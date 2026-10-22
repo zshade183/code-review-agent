@@ -1,0 +1,11 @@
+# Streamlit 应用外观。固定为浅色主题，与 web/app.py 里的卡片配色保持一致。
+[theme]
+base = "light"
+primaryColor = "#4C78A8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#0F172A"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

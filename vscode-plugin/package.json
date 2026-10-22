@@ -1,0 +1,90 @@
+{
+    "name": "ai-code-reviewer",
+    "displayName": "AI Code Reviewer & Optimizer",
+    "description": "基于 LLM 的智能代码审查与优化工具",
+    "version": "0.0.1",
+    "publisher": "local",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Linters",
+        "Programming Languages"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "ai-reviewer.review",
+                "title": "AI 代码审查 (Review)",
+                "category": "AI Reviewer"
+            },
+            {
+                "command": "ai-reviewer.optimize",
+                "title": "AI 代码优化 (Optimize)",
+                "category": "AI Reviewer"
+            },
+            {
+                "command": "ai-reviewer.reviewSelection",
+                "title": "AI 代码审查 (选中代码)",
+                "category": "AI Reviewer"
+            },
+            {
+                "command": "ai-reviewer.optimizeSelection",
+                "title": "AI 代码优化 (选中代码)",
+                "category": "AI Reviewer"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "ai-reviewer.review",
+                    "group": "modification",
+                    "when": "resourceLangId == python"
+                },
+                {
+                    "command": "ai-reviewer.optimize",
+                    "group": "modification",
+                    "when": "resourceLangId == python"
+                },
+                {
+                    "command": "ai-reviewer.reviewSelection",
+                    "group": "modification",
+                    "when": "resourceLangId == python && editorHasSelection"
+                },
+                {
+                    "command": "ai-reviewer.optimizeSelection",
+                    "group": "modification",
+                    "when": "resourceLangId == python && editorHasSelection"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "AI Code Reviewer",
+            "properties": {
+                "aiReviewer.apiHost": {
+                    "type": "string",
+                    "default": "http://127.0.0.1:8000",
+                    "description": "后台 API 服务地址"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.75.0",
+        "@types/node": "16.x",
+        "typescript": "^4.9.5",
+        "ts-loader": "^9.4.2",
+        "webpack": "^5.75.0",
+        "webpack-cli": "^5.0.1"
+    },
+    "dependencies": {}
+}

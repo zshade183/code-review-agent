@@ -1,0 +1,1902 @@
+[
+  {
+    "id": "DATA-PY-223",
+    "language": "Python",
+    "code": "def s(p,d):pass\ndef sv(d,p):pass",
+    "fixed_code": "def s(p,d):pass\nsv=s",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Low",
+        "description": "重复函数",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "复用函数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-114",
+    "language": "Python",
+    "code": "def very_long_function():\n    # 初始化20行\n    # 逻辑30行\n    # 收尾10行\n    return True",
+    "fixed_code": "def init():\n    pass\ndef process():\n    pass\ndef short_function():\n    init()\n    process()\n    return True",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数行数过长，逻辑复杂难以维护",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "拆分为多个小函数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-156",
+    "language": "Python",
+    "code": "def is_mid(age):\n    return 30 < age < 50",
+    "fixed_code": "def is_mid(age):\n    return 30 <= age <= 50",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium-High",
+        "description": "中年年龄边界条件错误，30岁和50岁未被包含",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将开区间改为闭区间[30,50]"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-060",
+    "language": "Python",
+    "code": "def get_total(prices):\n    total = 0\n    for price in prices:\n        total += price\n    return total",
+    "fixed_code": "def get_total(prices):\n    return sum(prices)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "手动循环求和，存在冗余计算，内置sum函数性能更优",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用内置sum函数替代手动循环"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-052",
+    "language": "Python",
+    "code": "def render_page(user_input):\n    return f\"<html><body>{user_input}</body></html>\"",
+    "fixed_code": "import html\ndef render_page(user_input):\n    safe_input = html.escape(user_input)\n    return f\"<html><body>{safe_input}</body></html>\"",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "用户输入未做HTML转义直接渲染到页面，存在XSS漏洞",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用html.escape对用户输入进行转义处理"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-240",
+    "language": "Python",
+    "code": "def is_big(n):return n>50",
+    "fixed_code": "MAX=50\ndef is_big(n):return n>MAX",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "魔法数字50",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "常量"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-126",
+    "language": "Java",
+    "code": "public void buildOrder(String n, int a, double p, String s, String d, int t, String e) { }",
+    "fixed_code": "public void buildOrder(OrderDTO dto) { }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "方法参数过多，可读性和可维护性差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用DTO对象封装所有参数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-107",
+    "language": "Java",
+    "code": "public void runCommand(String input)throws Exception{Runtime.getRuntime().exec(\"rm -rf \"+input);}",
+    "fixed_code": "public void runCommand(String input)throws Exception{String[] cmd={\"rm\",\"-rf\",input};Runtime.getRuntime().exec(cmd);}",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "拼接用户输入执行命令，存在命令注入高危漏洞",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用字符串数组传参执行系统命令"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-197",
+    "language": "Python",
+    "code": "def loop_while(nums):\n    i=0\n    while i<len(nums):\n        print(nums[i])\n        i+=1",
+    "fixed_code": "def loop_while(nums):\n    for num in nums:\n        print(num)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "while索引遍历效率低于for-in遍历",
+        "location": {
+          "line_start": 2,
+          "line_end": 5
+        },
+        "fix_suggestion": "使用for-in直接遍历"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-034",
+    "language": "Python",
+    "code": "def copy_user(user):\n    import copy\n    new_user = copy.deepcopy(user)\n    new_user['age'] = 20\n    return new_user",
+    "fixed_code": "def copy_user(user):\n    new_user = user.copy()\n    new_user['age'] = 20\n    return new_user",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "一维字典使用深拷贝，性能浪费，浅拷贝即可满足需求",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用字典浅拷贝替代深拷贝"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-144",
+    "language": "Java",
+    "code": "public int calcMod(int x, int y) { return x % y; }",
+    "fixed_code": "public int calcMod(int x, int y) { if(y == 0) throw new ArithmeticException(\"除数不能为0\"); return x % y; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断取模除数为0",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加除数非0判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-001",
+    "language": "Python",
+    "code": "import os\ndef exec_cmd(user_input):\n    os.system(f\"rm -rf {user_input}\")\nexec_cmd(\"test\")",
+    "fixed_code": "import subprocess\ndef exec_cmd(user_input):\n    subprocess.run([\"rm\", \"-rf\", user_input], check=True)\nexec_cmd(\"test\")",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "用户输入直接拼接系统命令，存在命令注入漏洞",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用subprocess.run的列表传参，禁止字符串拼接命令"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-243",
+    "language": "Python",
+    "code": "def mod(a,b):return a%b",
+    "fixed_code": "def mod(a,b):\n    if b==0:raise ValueError()\n    return a%b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断模数为0",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-096",
+    "language": "Python",
+    "code": "def super_long_function():\n    # 10行初始化\n    # 20行逻辑\n    # 15行返回\n    pass",
+    "fixed_code": "def init_data():\n    pass\ndef process_data():\n    pass\ndef short_function():\n    init_data()\n    process_data()",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数行数过长，逻辑复杂，难以维护",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "拆分为多个小函数，简化逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-205",
+    "language": "Java",
+    "code": "public int getByIndex(int[] arr, int idx) { return arr[idx]; }",
+    "fixed_code": "public int getByIndex(int[] arr, int idx) { if(arr == null || idx < 0 || idx >= arr.length) return -1; return arr[idx]; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium-High",
+        "description": "未校验数组索引合法性",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "校验索引区间"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-161",
+    "language": "Java",
+    "code": "public List<Integer> filterEven(List<Integer> list) { List<Integer> r = new ArrayList<>(); for(int i=0;i<list.size();i++){if(list.get(i)%2==0)r.add(list.get(i));}return r; }",
+    "fixed_code": "public List<Integer> filterEven(List<Integer> list) { List<Integer> r = new ArrayList<>(); for(Integer i : list){if(i%2==0)r.add(i);}return r; }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "索引遍历List效率低于增强for循环",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用增强for循环遍历元素"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-191",
+    "language": "Java",
+    "code": "public Object unserialize(byte[] d)throws Exception{ObjectInputStream ois=new ObjectInputStream(new ByteArrayInputStream(d));return ois.readObject();}",
+    "fixed_code": "public Object unserialize(byte[] d)throws Exception{return new ObjectMapper().readValue(d,Object.class);}",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Insecure Deserialization",
+        "severity": "High",
+        "description": "Java原生反序列化风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用JSON序列化"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-176",
+    "language": "Java",
+    "code": "public String getGrade(int s){if(s>=60)return \"C\";else if(s>=95)return \"A\";return \"D\";}",
+    "fixed_code": "public String getGrade(int s){if(s>=95)return \"A\";else if(s>=60)return \"C\";return \"D\";}",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "分数判断顺序错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "按分数从高到低判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-226",
+    "language": "Python",
+    "code": "def q(n):\n    s=f\"select * from t where n='{n}'\"\n    c.execute(s)",
+    "fixed_code": "def q(n):\n    s=\"select * from t where n=?\"\n    c.execute(s,(n,))",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "High",
+        "description": "SQL拼接注入",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "参数化"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-194",
+    "language": "Java",
+    "code": "public int div(int a,int b){return a/b;}",
+    "fixed_code": "public int div(int a,int b){if(b==0)throw new ArithmeticException();return a/b;}",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断除数为0",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加除数判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-178",
+    "language": "Python",
+    "code": "def get_attr(obj):\n    return obj.attr",
+    "fixed_code": "def get_attr(obj):\n    if obj is None:\n        return None\n    return getattr(obj, \"attr\", None)",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未判断对象为空，直接访问属性触发AttributeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加空值判断与属性存在性校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-139",
+    "language": "Java",
+    "code": "public boolean exist(List<Integer> list, int v) { for(int i : list) { if(i == v) return true; } return false; }",
+    "fixed_code": "public boolean exist(Set<Integer> set, int v) { return set.contains(v); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "List查找O(n)，Set查找O(1)，结构使用不当",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用Set做存在性判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-172",
+    "language": "Java",
+    "code": "public void longFunc(){//初始化20行//逻辑40行//收尾15行}",
+    "fixed_code": "public void init(){}public void process(){}public void shortFunc(){init();process();}",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "方法过长，难以维护",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "拆分为多个小方法"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-048",
+    "language": "Python",
+    "code": "def write_file(path, content):\n    f = open(path, 'w')\n    f.write(content)",
+    "fixed_code": "def write_file(path, content):\n    with open(path, 'w') as f:\n        f.write(content)",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "文件流未关闭，存在资源泄漏风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with语句自动关闭文件流"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-017",
+    "language": "Java",
+    "code": "public void test() { try { int a = 1/0; } catch(Exception e) {} }",
+    "fixed_code": "public void test() { try { int a = 1/0; } catch(ArithmeticException e) { e.printStackTrace(); } }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "捕获所有异常且空处理，无法排查问题",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "捕获具体异常并输出日志"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-217",
+    "language": "Java",
+    "code": "public String loadFile(String path) throws IOException { FileReader fr = new FileReader(path); return fr.toString(); }",
+    "fixed_code": "public String loadFile(String path) throws IOException { File f = new File(path); if(!f.exists()) return \"\"; try(FileReader fr = new FileReader(f)) { return fr.toString(); } }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未判断文件存在直接读取",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "先判断文件是否存在"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-064",
+    "language": "Java",
+    "code": "public void loop(Map<String,String> map) { for(String k : map.keySet()) { System.out.println(k + map.get(k)); } }",
+    "fixed_code": "public void loop(Map<String,String> map) { for(Map.Entry<String,String> entry : map.entrySet()) { System.out.println(entry.getKey() + entry.getValue()); } }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "先遍历 keySet 再 get，效率低",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用 entrySet 遍历键值对"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-241",
+    "language": "Python",
+    "code": "SECRET=\"abc123\"\ndef get_s():return SECRET",
+    "fixed_code": "import os\nSECRET=os.getenv(\"SECRET\")\ndef get_s():return SECRET",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "密钥硬编码",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "环境变量"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-106",
+    "language": "Python",
+    "code": "def test():\n    import math\n    return 1",
+    "fixed_code": "import math\ndef test():\n    return 1",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "import语句写在函数内部，不符合PEP8规范",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将import移至文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-227",
+    "language": "Java",
+    "code": "public void closeOut(OutputStream os) { }",
+    "fixed_code": "public void closeOut(OutputStream os) { if(os != null) { try { os.close(); } catch(IOException e) {} } }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "输出流未关闭，资源未释放",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "实现流关闭逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-176",
+    "language": "Python",
+    "code": "def query_user(name):\n    sql = \"SELECT * FROM user WHERE name='%s'\" % name\n    cursor.execute(sql)",
+    "fixed_code": "def query_user(name):\n    sql = \"SELECT * FROM user WHERE name=?\"\n    cursor.execute(sql, (name,))",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "High",
+        "description": "字符串格式化拼接SQL，存在注入漏洞",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用参数化查询避免SQL注入"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-240",
+    "language": "Java",
+    "code": "public String buildDiv(String content) { return \"<div>\" + content + \"</div>\"; }",
+    "fixed_code": "public String buildDiv(String content) { return \"<div>\" + HtmlUtils.htmlEscape(content) + \"</div>\"; }",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "未转义输入导致XSS漏洞",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "HTML转义用户输入"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-235",
+    "language": "Python",
+    "code": "def f(a,b,c,d):return a",
+    "fixed_code": "def f(a):return a",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Low",
+        "description": "多余参数",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "删除参数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-094",
+    "language": "Java",
+    "code": "public void saveFile(String path,String data){}public void save(String data,String path){}",
+    "fixed_code": "public void saveFile(String path,String data){}public void save(String data,String path){saveFile(path,data);}",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Low",
+        "description": "两个方法功能一致，仅参数顺序不同，代码冗余",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "复用已有方法逻辑，删除重复代码"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-130",
+    "language": "Java",
+    "code": "public List<Integer> copyList(List<Integer> list) { List<Integer> c = new ArrayList<>(); for(Integer i : list) c.add(i); return c; }",
+    "fixed_code": "public List<Integer> copyList(List<Integer> list) { return new ArrayList<>(list); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "基础类型列表手动循环拷贝，冗余低效",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用构造器浅拷贝即可"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-208",
+    "language": "Python",
+    "code": "def read():\n    f=open(\"a.txt\")\n    return f.read()",
+    "fixed_code": "def read():\n    with open(\"a.txt\") as f:\n        return f.read()",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "文件未关闭",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-018",
+    "language": "Java",
+    "code": "public void createUser(int a,int b,int c,int d,int e,int f,int g) { }",
+    "fixed_code": "public void createUser(UserParams params) { }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "函数参数过多，可读性极差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用参数对象封装参数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-068",
+    "language": "Java",
+    "code": "public boolean valid(int v) { if(v > 0) return true; }",
+    "fixed_code": "public boolean valid(int v) { return v > 0; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium-High",
+        "description": "条件不满足时无返回值",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "直接返回布尔表达式"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-099",
+    "language": "Python",
+    "code": "def test_func():\n    tmp = 0\n    return 1",
+    "fixed_code": "def test_func():\n    return 1",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Low",
+        "description": "变量tmp定义后未使用，属于冗余代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "删除未使用变量"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-198",
+    "language": "Python",
+    "code": "def dup_fun(): print(1)\ndef duplicate_func(): print(1)",
+    "fixed_code": "def dup_fun(): print(1)\nduplicate_func = dup_fun",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Low",
+        "description": "函数逻辑完全重复，冗余代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "复用函数删除重复代码"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-017",
+    "language": "Python",
+    "code": "def save_data(data):\n    try:\n        f = open(\"data.txt\", \"w\")\n        f.write(data)\n    except:\n        pass",
+    "fixed_code": "def save_data(data):\n    try:\n        with open(\"data.txt\", \"w\") as f:\n            f.write(data)\n    except IOError as e:\n        print(f\"文件写入失败：{e}\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "捕获所有异常且空处理，无法定位问题",
+        "location": {
+          "line_start": 5,
+          "line_end": 6
+        },
+        "fix_suggestion": "捕获具体异常，增加异常日志输出"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-073",
+    "language": "Java",
+    "code": "public Object unserialize(byte[] data) throws Exception { ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(data)); return ois.readObject(); }",
+    "fixed_code": "public Object unserialize(byte[] data) throws Exception { // 使用 JSON 序列化代替 return null; }",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Insecure Deserialization",
+        "severity": "High",
+        "description": "Java 原生反序列化不可信数据，存在 RCE 风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "禁用 Java 序列化，使用 JSON"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-226",
+    "language": "Java",
+    "code": "public String getScoreLevel(int s) { if(s>=70) return \"C\"; else if(s>=90) return \"A\"; return \"D\"; }",
+    "fixed_code": "public String getScoreLevel(int s) { if(s>=90) return \"A\"; else if(s>=70) return \"C\"; return \"D\"; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "分数判断顺序错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "按分数从高到低判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-053",
+    "language": "Java",
+    "code": "public boolean matchPhone(String s) { return s.matches(\".*1[3-9]\\\\d{9}.*\"); }",
+    "fixed_code": "public boolean matchPhone(String s) { return s.matches(\"^1[3-9]\\\\d{9}$\"); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Regular Expression",
+        "severity": "Medium",
+        "description": "使用 .* 贪婪匹配，效率低且匹配不准确",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用 ^ $ 精准匹配手机号"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-110",
+    "language": "Python",
+    "code": "def add(a, b):\n    return a + b",
+    "fixed_code": "def add(a: int, b: int) -> int:\n    return a + b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium-High",
+        "description": "无类型注解，传入非数字会触发类型错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加参数与返回值类型注解"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-243",
+    "language": "Java",
+    "code": "public int getArrItem(int[] arr,int idx) { return arr[idx]; }",
+    "fixed_code": "public int getArrItem(int[] arr,int idx) { if(arr == null || idx <0 || idx >= arr.length) return -1; return arr[idx]; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium-High",
+        "description": "未校验数组索引",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "校验索引合法性"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-058",
+    "language": "Python",
+    "code": "def get_status(code):\n    if code == 0:\n        return \"success\"\n    elif code == 1:\n        return \"fail\"\n    elif code == 2:\n        return \"pending\"\n    return \"unknown\"",
+    "fixed_code": "STATUS_SUCCESS = 0\nSTATUS_FAIL = 1\nSTATUS_PENDING = 2\ndef get_status(code):\n    status_map = {\n        STATUS_SUCCESS: \"success\",\n        STATUS_FAIL: \"fail\",\n        STATUS_PENDING: \"pending\"\n    }\n    return status_map.get(code, \"unknown\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "使用魔法数字0/1/2表示状态，无业务语义，可读性差",
+        "location": {
+          "line_start": 2,
+          "line_end": 7
+        },
+        "fix_suggestion": "定义常量表示状态码，使用字典映射简化逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-028",
+    "language": "Python",
+    "code": "def save(data, path):\n    pass",
+    "fixed_code": "def save(path, data):\n    pass",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Parameter Position Error",
+        "severity": "Medium-High",
+        "description": "函数参数位置颠倒，调用时易传参错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "调整参数顺序为标准的路径在前、数据在后"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-121",
+    "language": "Java",
+    "code": "public List<String> filterList(List<String> list) { List<String> res = new ArrayList<>(); for(int i=0; i<list.size(); i++) { res.add(list.get(i)); } return res; }",
+    "fixed_code": "public List<String> filterList(List<String> list) { return new ArrayList<>(list); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "手动循环拷贝列表，效率低于构造器直接拷贝",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用ArrayList构造器直接拷贝集合"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-030",
+    "language": "Python",
+    "code": "import subprocess\ndef run_cmd(cmd):\n    subprocess.Popen(cmd)",
+    "fixed_code": "import subprocess\ndef run_cmd(cmd):\n    proc = subprocess.Popen(cmd)\n    proc.wait()\n    proc.terminate()",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Memory Leak",
+        "severity": "Medium",
+        "description": "子进程未等待/终止，存在进程泄漏",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "等待子进程完成并终止进程"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-238",
+    "language": "Python",
+    "code": "def has(l,i):\n    for x in l:\n        if x==i:return True\n    return False",
+    "fixed_code": "def has(s,i):return i in s",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表查找低效",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用集合"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-121",
+    "language": "Python",
+    "code": "JWT_SECRET = \"mysecret123\"\ndef create_token():\n    return jwt.encode({}, JWT_SECRET)",
+    "fixed_code": "import os\nJWT_SECRET = os.getenv(\"JWT_SECRET\")\ndef create_token():\n    return jwt.encode({}, JWT_SECRET)",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "JWT密钥硬编码，存在泄露风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用环境变量存储密钥"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-050",
+    "language": "Java",
+    "code": "public boolean compare(Integer a, Integer b) { if(a = b) return true; return false; }",
+    "fixed_code": "public boolean compare(Integer a, Integer b) { return Objects.equals(a, b); }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium-High",
+        "description": "赋值运算符 = 误用为比较 ==",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用 == 或 Objects.equals 比较"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-198",
+    "language": "Java",
+    "code": "public String type(int t){if(t==7)return \"TEST\";return \"PROD\";}",
+    "fixed_code": "public static final int TYPE_TEST=7;public String type(int t){return t==TYPE_TEST?\"TEST\":\"PROD\";}",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "魔法数字7无含义",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "定义常量"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-150",
+    "language": "Python",
+    "code": "def kill_proc(pid):\n    os.system(f\"kill {pid}\")",
+    "fixed_code": "import signal\ndef kill_proc(pid):\n    os.kill(pid, signal.SIGTERM)",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "拼接kill命令存在注入风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用os.kill系统调用"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-046",
+    "language": "Java",
+    "code": "public void testMethod() { int unused = 99; System.out.println(\"test\"); }",
+    "fixed_code": "public void testMethod() { System.out.println(\"test\"); }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Low",
+        "description": "变量 unused 定义后从未使用",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "删除未使用变量"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-142",
+    "language": "Python",
+    "code": "def open_f():\n    f = open(\"test.txt\")",
+    "fixed_code": "def open_f():\n    with open(\"test.txt\") as f:\n        pass",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "文件未关闭",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用with"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-070",
+    "language": "Java",
+    "code": "public boolean isEmpty(String s) { return s.isEmpty(); }",
+    "fixed_code": "public boolean isEmpty(String s) { return s == null || s.isEmpty(); }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "字符串为 null 调用 isEmpty 触发 NPE",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "先判断 null"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-051",
+    "language": "Java",
+    "code": "public Connection getConnection() throws SQLException { return DriverManager.getConnection(\"jdbc:mysql://localhost:3306/test\",\"root\",\"123456\"); }",
+    "fixed_code": "public Connection getConnection(DataSource dataSource) throws SQLException { return dataSource.getConnection(); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant I/O/Database Query",
+        "severity": "Medium",
+        "description": "每次创建新连接，未使用连接池",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用 DataSource 连接池管理连接"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-009",
+    "language": "Python",
+    "code": "def is_adult(age):\n    return age > 18",
+    "fixed_code": "def is_adult(age):\n    return age >= 18",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium-High",
+        "description": "成年边界条件错误，18岁未被判定为成年",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将>修改为>=，修正边界逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-057",
+    "language": "Python",
+    "code": "def read_config():\n    f = open(\"config.ini\", \"r\")\n    content = f.read()\n    return content",
+    "fixed_code": "def read_config():\n    with open(\"config.ini\", \"r\") as f:\n        content = f.read()\n    return content",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "文件流打开后未关闭，存在文件句柄资源泄漏",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with语句自动关闭文件资源"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-139",
+    "language": "Python",
+    "code": "def get_conn():\n    import sqlite3\n    return sqlite3.connect(\"test.db\")",
+    "fixed_code": "import sqlite3\ndef get_conn():\n    return sqlite3.connect(\"test.db\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "import在函数内",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "移到文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-114",
+    "language": "Java",
+    "code": "public int divideNum(int a,int b){return a/b;}",
+    "fixed_code": "public int divideNum(int a,int b){if(b==0)throw new ArithmeticException(\"除数不能为0\");return a/b;}",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断除数为0，触发除零异常",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加除数为0的判断与异常抛出"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-225",
+    "language": "Java",
+    "code": "public void startProc() { ProcessBuilder pb = new ProcessBuilder(\"java\",\"-jar\",\"app.jar\"); pb.start(); }",
+    "fixed_code": "public void startProc() throws Exception { Process p = new ProcessBuilder(\"java\",\"-jar\",\"app.jar\").start(); p.waitFor(); p.destroy(); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Memory Leak",
+        "severity": "Medium",
+        "description": "子进程未等待未销毁，资源泄漏",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "等待并销毁子进程"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-111",
+    "language": "Python",
+    "code": "def query(sql):\n    import sqlite3\n    conn = sqlite3.connect(\"test.db\")\n    cursor = conn.cursor()\n    cursor.execute(sql)\n    return cursor.fetchall()",
+    "fixed_code": "import sqlite3\ndef query(sql, params=None):\n    with sqlite3.connect(\"test.db\") as conn:\n        cursor = conn.cursor()\n        cursor.execute(sql, params or ())\n        return cursor.fetchall()",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant I/O/Database Query",
+        "severity": "Medium",
+        "description": "每次查询新建连接，未关闭，IO开销巨大",
+        "location": {
+          "line_start": 3,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用with自动管理连接，支持参数化"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-154",
+    "language": "Python",
+    "code": "def get_last(arr):\n    return arr[-1]",
+    "fixed_code": "def get_last(arr):\n    return arr[-1] if arr else None",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium-High",
+        "description": "未判断列表非空，空列表访问负索引触发IndexError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "先判断列表非空再访问负索引"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-153",
+    "language": "Java",
+    "code": "public int getItem(int[] arr, int i) { return arr[i]; }",
+    "fixed_code": "public int getItem(int[] arr, int i) { if(arr == null || i < 0 || i >= arr.length) return -1; return arr[i]; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium-High",
+        "description": "未校验数组索引合法性",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "校验索引区间"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-153",
+    "language": "Python",
+    "code": "def get_user(obj):\n    return obj.get(\"user\").get(\"id\")",
+    "fixed_code": "def get_user(obj):\n    user = obj.get(\"user\", {})\n    return user.get(\"id\")",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "连续get未做空值判断，user不存在时触发AttributeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "逐层添加空值判断，设置默认空字典"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-175",
+    "language": "Python",
+    "code": "ACCESS_KEY = \"AKIA1234567890\"\ndef connect_oss():\n    return f\"oss://{ACCESS_KEY}@bucket\"",
+    "fixed_code": "import os\nACCESS_KEY = os.getenv(\"OSS_ACCESS_KEY\")\ndef connect_oss():\n    return f\"oss://{ACCESS_KEY}@bucket\"",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "云服务密钥硬编码，存在敏感信息泄露风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用环境变量存储密钥，禁止硬编码"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-005",
+    "language": "Python",
+    "code": "from flask import Flask, request\napp = Flask(__name__)\n@app.route(\"/comment\")\ndef comment():\n    content = request.args.get(\"content\")\n    return f\"<div>{content}</div>\"",
+    "fixed_code": "from flask import Flask, request, escape\napp = Flask(__name__)\n@app.route(\"/comment\")\ndef comment():\n    content = escape(request.args.get(\"content\"))\n    return f\"<div>{content}</div>\"",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "用户输入未转义直接输出到HTML，存在XSS漏洞",
+        "location": {
+          "line_start": 6,
+          "line_end": 6
+        },
+        "fix_suggestion": "使用escape函数对用户输入进行HTML转义"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-058",
+    "language": "Java",
+    "code": "public String getGrade(int score) { if(score>=70) return \"C\"; else if(score>=85) return \"B\"; else if(score>=95) return \"A\"; return \"D\"; }",
+    "fixed_code": "public String getGrade(int score) { if(score>=95) return \"A\"; else if(score>=85) return \"B\"; else if(score>=70) return \"C\"; return \"D\"; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "分数判断顺序错误，高分无法命中",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "按分数从高到低判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-098",
+    "language": "Python",
+    "code": "def save_file(path, data):\n    pass\ndef save_data(data, path):\n    pass",
+    "fixed_code": "def save_file(path, data):\n    pass\nsave_data = save_file",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Low",
+        "description": "函数功能一致，仅参数顺序不同，代码冗余",
+        "location": {
+          "line_start": 3,
+          "line_end": 4
+        },
+        "fix_suggestion": "复用函数，删除重复逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-028",
+    "language": "Java",
+    "code": "public String getLevel(int score) { if(score>=60) return \"PASS\"; else if(score>80) return \"GOOD\"; return \"FAIL\"; }",
+    "fixed_code": "public String getLevel(int score) { if(score>80) return \"GOOD\"; else if(score>=60) return \"PASS\"; return \"FAIL\"; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "条件判断顺序错误，高分无法命中",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "调整条件从高到低判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-009",
+    "language": "Java",
+    "code": "public boolean isChild(int age) { return age < 18; }",
+    "fixed_code": "public boolean isChild(int age) { return age >=0 && age < 18; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium-High",
+        "description": "未判断年龄负数，边界条件错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加年龄下限判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-033",
+    "language": "Python",
+    "code": "def parse_data(data):\n    result = []\n    for item in data:\n        for sub_item in item['list']:\n            result.append(sub_item)\n    return result",
+    "fixed_code": "def parse_data(data):\n    return [sub_item for item in data for sub_item in item.get('list', [])]",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "嵌套循环实现列表扁平化，效率低于列表推导式",
+        "location": {
+          "line_start": 3,
+          "line_end": 5
+        },
+        "fix_suggestion": "使用单层列表推导式扁平化嵌套数据"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-100",
+    "language": "Python",
+    "code": "def start_process():\n    import subprocess\n    subprocess.Popen([\"python\", \"server.py\"])",
+    "fixed_code": "def start_process():\n    import subprocess\n    proc = subprocess.Popen([\"python\", \"server.py\"])\n    proc.wait()\n    proc.kill()",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Memory Leak",
+        "severity": "Medium",
+        "description": "子进程未管理，造成资源泄漏",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "等待并终止子进程"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-089",
+    "language": "Java",
+    "code": "public Connection getDBConn()throws SQLException{return DriverManager.getConnection(\"jdbc:mysql:///test\",\"root\",\"root123\");}",
+    "fixed_code": "public Connection getDBConn(DataSource ds)throws SQLException{return ds.getConnection();}",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant I/O/Database Query",
+        "severity": "Medium",
+        "description": "未使用连接池，每次新建数据库连接",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用DataSource连接池复用连接"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-213",
+    "language": "Java",
+    "code": "public Dept findDept(List<Dept> list, Long id) { for(Dept d : list) { if(d.getId().equals(id)) return d; } return null; }",
+    "fixed_code": "public Dept findDept(Map<Long,Dept> map, Long id) { return map.get(id); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "List线性查找低效，使用Map哈希查找",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用Map存储提升效率"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-167",
+    "language": "Python",
+    "code": "def equal(a, b):\n    if a = b:\n        return True\n    return False",
+    "fixed_code": "def equal(a, b):\n    if a == b:\n        return True\n    return False",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium-High",
+        "description": "赋值运算符=误用为比较运算符==，语法错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将=修改为==比较运算符"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-069",
+    "language": "Python",
+    "code": "import re\ndef match_id(text):\n    return re.findall(\".*\\d{6}\", text)",
+    "fixed_code": "import re\ndef match_id(text):\n    return re.findall(r\"\\b\\d{6}\\b\", text)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Regular Expression",
+        "severity": "Medium",
+        "description": "正则使用贪婪匹配.*，执行效率极低且匹配不准确",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用精准非贪婪正则匹配"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-166",
+    "language": "Java",
+    "code": "public void create(String n,int a,String p,String e,String ad,int t,String s){}",
+    "fixed_code": "public void create(UserDTO dto){}",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "方法参数过多，可读性极差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用DTO封装参数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-166",
+    "language": "Python",
+    "code": "def load_json():\n    f = open(\"data.json\")\n    return f.read()",
+    "fixed_code": "import os\ndef load_json():\n    if not os.path.exists(\"data.json\"):\n        return \"{}\"\n    with open(\"data.json\") as f:\n        return f.read()",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未检查文件存在性，直接读取触发FileNotFoundError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "先判断文件存在性再执行读取操作"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-116",
+    "language": "Java",
+    "code": "public int addNum(int a,int b){System.out.println(a+b);return 0;}",
+    "fixed_code": "public int addNum(int a,int b){return a+b;}",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium-High",
+        "description": "使用打印代替返回值，调用方获取结果错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "直接返回计算结果"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-108",
+    "language": "Java",
+    "code": "public int getStrLength(String s){return s.length();}",
+    "fixed_code": "public int getStrLength(String s){return s==null?0:s.length();}",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "字符串为null调用length()触发空指针异常",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加字符串空值判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-010",
+    "language": "Java",
+    "code": "public int add(int a, int b) { System.out.println(a+b); return 0; }",
+    "fixed_code": "public int add(int a, int b) { return a + b; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium-High",
+        "description": "使用打印代替返回值，调用方获取结果错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "直接返回计算结果"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-006",
+    "language": "Python",
+    "code": "def get_user_info(user):\n    return user[\"name\"]",
+    "fixed_code": "def get_user_info(user):\n    if user is None or \"name\" not in user:\n        return None\n    return user[\"name\"]",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未对user对象做空值校验，直接访问键会触发KeyError/AttributeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加空值判断和键存在性校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-063",
+    "language": "Python",
+    "code": "def save_file(path, content):\n    try:\n        with open(path, \"w\") as f:\n            f.write(content)\n    except:\n        pass",
+    "fixed_code": "def save_file(path, content):\n    try:\n        with open(path, \"w\") as f:\n            f.write(content)\n    except IOError as e:\n        print(f\"文件保存失败: {e}\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "捕获所有异常且空处理，无法定位异常问题",
+        "location": {
+          "line_start": 5,
+          "line_end": 6
+        },
+        "fix_suggestion": "捕获具体异常类型，增加异常日志输出"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-090",
+    "language": "Java",
+    "code": "public Map<String,Object> cloneMap(Map<String,Object> map){return new HashMap<>(map);}",
+    "fixed_code": "public Map<String,Object> cloneMap(Map<String,Object> map){return new HashMap<>(map);}",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "一维Map无需深拷贝，浅拷贝即可满足需求",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "保留构造器浅拷贝，删除冗余深拷贝逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-014",
+    "language": "Java",
+    "code": "public int sum(List<Integer> list) { int total =0; for(int i : list) total +=i; return total; }",
+    "fixed_code": "public int sum(List<Integer> list) { return list.stream().mapToInt(Integer::intValue).sum(); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "手动循环求和冗余，流式API更高效",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用Stream流求和"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-062",
+    "language": "Python",
+    "code": "def test():\n    import json\n    a = 10\n    return a",
+    "fixed_code": "import json\ndef test():\n    a = 10\n    return a",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "import语句写在函数内部，违反Python编码规范",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将import语句移至文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-131",
+    "language": "Java",
+    "code": "public boolean matchEmail(String s) { return s.matches(\".*@.*\\\\..*\"); }",
+    "fixed_code": "public boolean matchEmail(String s) { return s.matches(\"^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$\"); }",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Regular Expression",
+        "severity": "Medium",
+        "description": "贪婪匹配正则，效率低且匹配不准确",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用精准正则表达式匹配邮箱"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-075",
+    "language": "Python",
+    "code": "def demo():\n    x = 100\n    y = 200\n    return x",
+    "fixed_code": "def demo():\n    x = 100\n    return x",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Low",
+        "description": "变量y定义后未使用，属于死代码",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "删除未使用的死代码"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-101",
+    "language": "Python",
+    "code": "def unsafe_eval(user_input):\n    return eval(user_input)",
+    "fixed_code": "import ast\ndef safe_eval(user_input):\n    try:\n        return ast.literal_eval(user_input)\n    except:\n        return None",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "High",
+        "description": "使用eval执行用户输入，存在任意代码执行高危风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用ast.literal_eval替代eval，禁止执行不可信输入"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-199",
+    "language": "Python",
+    "code": "def is_zero(num):\n    if num == 0:\n        return True",
+    "fixed_code": "def is_zero(num):\n    return num == 0",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "逻辑冗余，无else分支返回False",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "简化逻辑直接返回判断结果"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-091",
+    "language": "Python",
+    "code": "def read_data():\n    f = open(\"data.txt\")\n    return f.read()",
+    "fixed_code": "import os\ndef read_data():\n    if not os.path.exists(\"data.txt\"):\n        return \"\"\n    with open(\"data.txt\") as f:\n        return f.read()",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未检查文件存在性，直接读取会触发异常",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "先判断文件是否存在再读取"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-207",
+    "language": "Java",
+    "code": "public boolean isElder(int age) { return age > 60; }",
+    "fixed_code": "public boolean isElder(int age) { return age >= 60; }",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium-High",
+        "description": "60岁未命中，边界条件错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "改为>=闭区间判断"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-071",
+    "language": "Python",
+    "code": "DB_PWD = \"123456\"\ndef connect():\n    return f\"mysql://root:{DB_PWD}@localhost/test\"",
+    "fixed_code": "import os\ndef connect():\n    pwd = os.getenv(\"DB_PASSWORD\")\n    return f\"mysql://root:{pwd}@localhost/test\"",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "数据库密码硬编码在代码中，存在敏感信息泄露风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用环境变量存储敏感信息，禁止硬编码"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-157",
+    "language": "Python",
+    "code": "def calculate(a, b):\n    res = a * b\n    print(res)",
+    "fixed_code": "def calculate(a, b):\n    res = a * b\n    return res",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium-High",
+        "description": "使用print输出结果，调用方无法获取返回值",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "将print替换为return返回计算结果"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-061",
+    "language": "Python",
+    "code": "def find_product(products, pid):\n    for p in products:\n        if p[\"id\"] == pid:\n            return p\n    return None",
+    "fixed_code": "def build_product_map(products):\n    return {p[\"id\"]: p for p in products}\ndef find_product(product_map, pid):\n    return product_map.get(pid)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "使用列表线性查找，时间复杂度O(n)，查询效率低",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用字典哈希表存储，时间复杂度O(1)"
+      }
+    ]
+  },
+  {
+    "id": "DATA-JAVA-012",
+    "language": "Java",
+    "code": "public String getType(int t) { if(t==1) return \"IMG\"; else return \"VIDEO\"; }",
+    "fixed_code": "public static final int TYPE_IMG = 1; public static final int TYPE_VIDEO = 2; public String getType(int t) { return t == TYPE_IMG ? \"IMG\" : \"VIDEO\"; }",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "使用魔法数字1，无业务语义",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "定义常量替代魔法数字"
+      }
+    ]
+  }
+]

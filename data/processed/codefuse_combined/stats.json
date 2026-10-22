@@ -1,0 +1,22 @@
+{
+  "total": 8,
+  "by_category": {
+    "Security Vulnerability": 2,
+    "Potential Bug": 2,
+    "Code Smell": 2,
+    "Performance Issue": 2
+  },
+  "by_project": {
+    "django": 1,
+    "flask": 1,
+    "requests": 1,
+    "numpy": 1,
+    "pandas": 1,
+    "scikit-learn": 1,
+    "tensorflow": 1,
+    "torch": 1
+  },
+  "avg_code_length": 126.125,
+  "max_code_length": 263,
+  "min_code_length": 44
+}

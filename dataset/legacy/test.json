@@ -1,0 +1,1777 @@
+[
+{
+  "id": "DATA-PY-202",
+  "language": "Python",
+  "code": "def show_msg(msg):\n    return f\"<h1>{msg}</h1>\"",
+  "fixed_code": "import html\n\n# 统一定义具名常量，便于后续维护\nHTML_WRAPPER_TAG = \"h1\"\n\ndef show_msg(msg):\n    \"\"\"将输入的消息内容包装为安全的HTML标题格式并返回\n\n    Args:\n        msg (str): 要展示的消息文本内容\n\n    Returns:\n        str: 完成特殊字符转义的HTML格式标题字符串\n    \"\"\"\n    # 入参合法性校验与容错处理\n    if not isinstance(msg, str):\n        msg = str(msg) if msg is not None else \"\"\n    # 转义用户输入，防范XSS风险\n    safe_msg = html.escape(msg)\n    # 拼接返回格式化内容\n    return f\"<{HTML_WRAPPER_TAG}>{safe_msg}</{HTML_WRAPPER_TAG}>\"",
+  "issues": [
+    {
+      "category": "Security Vulnerability",
+      "subtype": "Cross-Site Scripting (XSS)",
+      "severity": "High",
+      "description": "用户输入未转义直接输出HTML，存在跨站脚本攻击风险，可窃取Cookie、伪造操作等",
+      "location": {
+        "line_start": 2,
+        "line_end": 2
+      },
+      "fix_suggestion": "使用html.escape()对用户输入进行HTML特殊字符转义"
+    },
+    {
+      "category": "Potential Bug",
+      "subtype": "Null Pointer/None Check Missing, Type Error",
+      "severity": "Low",
+      "description": "未对入参msg做空值、类型校验，传入None/非字符串会输出异常内容或触发错误",
+      "location": {
+        "line_start": 1,
+        "line_end": 1
+      },
+      "fix_suggestion": "增加入参合法性校验与容错处理，统一转换为安全字符串"
+    },
+    {
+      "category": "Code Smell",
+      "subtype": "Magic Number",
+      "severity": "Low",
+      "description": "硬编码HTML标签<h1>作为魔法常量，后续维护需直接修改业务代码",
+      "location": {
+        "line_start": 2,
+        "line_end": 2
+      },
+      "fix_suggestion": "将硬编码标签定义为具名常量统一管理"
+    }
+  ]
+},
+  {
+    "id": "DATA-PY-152",
+    "language": "Python",
+    "code": "def render_html(content):\n    return f\"<div>{content}</div>\"",
+    "fixed_code": "import html\n\n# 统一定义具名常量，便于后续维护\nHTML_WRAPPER_TAG = \"div\"\n\ndef render_html(content):\n    \"\"\"将输入的内容包装为安全的HTML div格式并返回\n\n    Args:\n        content (str): 要展示的文本内容\n\n    Returns:\n        str: 完成特殊字符转义的HTML格式字符串\n    \"\"\"\n    # 入参合法性校验与容错处理\n    if not isinstance(content, str):\n        content = str(content) if content is not None else \"\"\n    # 转义用户输入，防范XSS风险\n    safe_content = html.escape(content)\n    # 拼接返回格式化内容\n    return f\"<{HTML_WRAPPER_TAG}>{safe_content}</{HTML_WRAPPER_TAG}>\"",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "用户输入未转义直接渲染HTML，存在XSS漏洞，可窃取Cookie、伪造操作等",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用html.escape对输入内容进行转义处理"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing, Type Error",
+        "severity": "Low",
+        "description": "未对入参content做空值、类型校验，传入None/非字符串会输出异常内容或触发错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加入参合法性校验与容错处理，统一转换为安全字符串"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "硬编码HTML标签<div>作为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将硬编码标签定义为具名常量统一管理"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-227",
+    "language": "Python",
+    "code": "def cmd(i):os.system(f\"mkdir {i}\")",
+    "fixed_code": "import subprocess\nimport shlex\n\ndef cmd(i):\n    \"\"\"安全执行创建目录的系统命令\n\n    Args:\n        i (str): 要创建的目录路径\n\n    Raises:\n        subprocess.CalledProcessError: 命令执行失败时抛出\n    \"\"\"\n    # 入参合法性校验\n    if not isinstance(i, str) or not i.strip():\n        raise ValueError(\"目录路径必须是非空字符串\")\n    # 使用subprocess.run列表传参，完全避免命令注入\n    subprocess.run([\"mkdir\", i], check=True, shell=False)",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "使用os.system+字符串拼接执行命令，存在命令注入漏洞，可执行任意系统命令",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用subprocess.run列表传参，禁止使用shell=True"
+      },
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "Medium-High",
+        "description": "使用os.system危险函数，该函数默认开启shell解析，极易引发安全问题",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "替换为subprocess模块的安全函数（如subprocess.run）"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing, Type Error",
+        "severity": "Medium",
+        "description": "未对入参i做空值、非空字符串校验，传入None/空字符串/非字符串会导致命令执行失败或异常",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加入参合法性校验，抛出明确的ValueError"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数参数i命名无意义，不符合PEP8规范，应使用有语义的名称",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将参数i重命名为directory_path或dir_path"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "未捕获命令执行失败的异常，调用方无法感知执行结果",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用subprocess.run的check=True参数抛出CalledProcessError，或显式捕获异常"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-002",
+    "language": "Python",
+    "code": "import sqlite3\ndef query_user(username):\n    conn = sqlite3.connect(\"test.db\")\n    cursor = conn.cursor()\n    sql = f\"SELECT * FROM user WHERE name='{username}'\"\n    cursor.execute(sql)\n    return cursor.fetchall()",
+    "fixed_code": "import sqlite3\nfrom contextlib import contextmanager\n\n# 统一定义具名常量，便于后续维护\nDB_PATH = \"test.db\"\n\n@contextmanager\ndef get_db_connection():\n    \"\"\"上下文管理器，自动管理数据库连接的打开与关闭\n\n    Yields:\n        sqlite3.Connection: 数据库连接对象\n    \"\"\"\n    conn = None\n    try:\n        conn = sqlite3.connect(DB_PATH)\n        yield conn\n    finally:\n        if conn:\n            conn.close()\n\ndef query_user(username):\n    \"\"\"根据用户名安全查询用户信息\n\n    Args:\n        username (str): 要查询的用户名\n\n    Returns:\n        list[tuple]: 查询到的用户信息列表，每个元素为一条用户记录\n    \"\"\"\n    # 入参合法性校验\n    if not isinstance(username, str) or not username.strip():\n        return []\n    # 使用参数化查询+上下文管理器，避免SQL注入+资源泄漏\n    with get_db_connection() as conn:\n        cursor = conn.cursor()\n        sql = \"SELECT * FROM user WHERE name=?\"\n        cursor.execute(sql, (username,))\n        return cursor.fetchall()",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "High",
+        "description": "使用字符串拼接SQL语句，存在SQL注入漏洞，可窃取/篡改/删除数据库数据",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "使用参数化查询（?占位符），禁止直接拼接用户输入到SQL语句"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "数据库连接conn未显式关闭，存在资源泄漏风险，长时间运行可能耗尽数据库连接池",
+        "location": {
+          "line_start": 3,
+          "line_end": 7
+        },
+        "fix_suggestion": "使用上下文管理器（contextlib.contextmanager）或try-finally块自动关闭连接"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing, Type Error",
+        "severity": "Low",
+        "description": "未对入参username做空值、非空字符串校验，传入None/空字符串/非字符串会导致无效查询或异常",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加入参合法性校验，直接返回空列表避免无效查询"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "硬编码数据库路径\"test.db\"作为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "将硬编码路径定义为具名常量统一管理"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-032",
+    "language": "Python",
+    "code": "def connect_redis():\n    import redis\n    r = redis.Redis(host='127.0.0.1', port=6379, password='123456')\n    return r",
+    "fixed_code": "import os\nimport redis\n\ndef connect_redis():\n    # 从环境变量获取配置，带默认值\n    host = os.getenv('REDIS_HOST', '127.0.0.1')\n    port_str = os.getenv('REDIS_PORT', '6379')\n    password = os.getenv('REDIS_PASSWORD')\n    \n    # 端口类型校验\n    try:\n        port = int(port_str)\n    except ValueError:\n        port = 6379\n    \n    r = redis.Redis(\n        host=host,\n        port=port,\n        password=password\n    )\n    return r",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "Redis密码、地址硬编码在代码中，存在敏感信息泄露风险",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用环境变量存储配置，禁止硬编码敏感信息"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未对Redis核心配置（如host）的空值情况做容错处理",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "为环境变量配置添加合理默认值"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未对Redis端口的环境变量值做整数类型校验，传入非数字字符串会报错",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "添加端口的try-except整数转换校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "Redis默认地址、端口硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "将硬编码配置项通过环境变量默认值或具名常量统一管理"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Low",
+        "description": "redis模块导入放在函数内部，每次调用都会重复执行导入逻辑（虽Python有缓存但结构不合理）",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将模块导入移到文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-236",
+    "language": "Python",
+    "code": "def ev(i):eval(i)",
+    "fixed_code": "import ast\n\ndef safe_eval_literal(input_str):\n    # 空值与类型校验\n    if not isinstance(input_str, str):\n        raise TypeError(\"输入必须是字符串类型的Python字面量\")\n    \n    # 安全解析字面量并捕获异常\n    try:\n        return ast.literal_eval(input_str)\n    except (ValueError, SyntaxError, TypeError):\n        return None",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "High",
+        "description": "使用eval执行用户输入，可执行任意Python代码，存在极高安全风险",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "替换为ast.literal_eval，仅解析合法的Python字面量"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未对输入参数做空值校验，传入None会报错",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加输入参数的空值与类型校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未对输入参数做字符串类型校验，传入非字符串会报错",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "增加输入参数的字符串类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名ev和参数名i均无明确语义，不符合PEP8命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将函数名改为safe_eval_literal，参数名改为input_str"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "未捕获ast.literal_eval解析非法字面量时抛出的异常",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "添加try-except捕获ValueError、SyntaxError、TypeError"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-144",
+    "language": "Python",
+    "code": "def unsafe_exec(input):\n    exec(input)",
+    "fixed_code": "def safe_exec(input_str):\n    # 空值与类型校验\n    if not isinstance(input_str, str):\n        raise TypeError(\"输入必须是字符串类型\")\n    \n    # 简单白名单校验：仅允许执行无副作用的算术表达式\n    import re\n    allowed_pattern = re.compile(r'^[0-9+\\-*/().\\s]+$')\n    if not allowed_pattern.match(input_str):\n        raise ValueError(\"仅允许执行无副作用的算术表达式\")\n    \n    # 安全执行算术表达式\n    try:\n        return eval(input_str, {'__builtins__': None}, {})\n    except (SyntaxError, TypeError, ZeroDivisionError):\n        return None",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "High",
+        "description": "使用exec执行用户输入，可执行任意Python代码，存在极高安全风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "禁用exec，若必须执行简单逻辑则使用严格白名单校验+受限eval"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未对输入参数做空值校验，传入None会报错",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加输入参数的空值与类型校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未对输入参数做字符串类型校验，传入非字符串会报错",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加输入参数的字符串类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "参数名input覆盖了Python内置函数input，不符合命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将参数名改为input_str"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "未捕获执行逻辑时抛出的异常",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "添加try-except捕获相关异常"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-125",
+    "language": "Python",
+    "code": "def get_name(user):\n    return user[\"name\"]",
+    "fixed_code": "def get_name(user):\n    # 空值与类型校验\n    if user is None or not isinstance(user, dict):\n        return None\n    # 安全获取键值\n    return user.get(\"name\")",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未判断user是否为None，直接访问键会报错",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加空值判断"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断user是否为字典类型，直接访问键或get方法会报错",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加字典类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-097",
+    "language": "Python",
+    "code": "def check_value(val):\n    if val > 0:\n        if val < 100:\n            return True\n    return False",
+    "fixed_code": "def check_value(val):\n    \"\"\"检查数值是否在(0, 100)开区间内\n\n    Args:\n        val (int/float): 待检查的数值\n\n    Returns:\n        bool: 数值在开区间内返回True，否则返回False\n    \"\"\"\n    # 空值与类型校验\n    if val is None:\n        return False\n    if not isinstance(val, (int, float)):\n        return False\n    # 简化链式比较逻辑\n    return 0 < val < 100",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "嵌套if逻辑冗余，代码可读性差且易引入逻辑错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用Python链式比较简化逻辑"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断val是否为None，直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加val的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断val是否为数值类型（int/float），直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加val的数值类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-055",
+    "language": "Python",
+    "code": "def is_teen(age):\n    return 12 < age < 20",
+    "fixed_code": "def is_teen(age):\n    \"\"\"检查年龄是否属于青少年范围[13, 19]闭区间\n\n    Args:\n        age (int/float): 待检查的年龄\n\n    Returns:\n        bool: 年龄在闭区间内返回True，否则返回False\n    \"\"\"\n    # 统一定义具名常量，便于后续维护\n    MIN_TEEN_AGE = 13\n    MAX_TEEN_AGE = 19\n    \n    # 空值与类型校验\n    if age is None:\n        return False\n    if not isinstance(age, (int, float)):\n        return False\n    # 修正边界为闭区间\n    return MIN_TEEN_AGE <= age <= MAX_TEEN_AGE",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium-High",
+        "description": "青少年年龄边界条件错误，13岁和19岁未正确包含",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "修正边界为闭区间[13, 19]"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断age是否为None，直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加age的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断age是否为数值类型（int/float），直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加age的数值类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "青少年年龄范围12、20硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将硬编码年龄范围定义为具名常量统一管理"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-010",
+    "language": "Python",
+    "code": "def calc(a, b):\n    print(a + b)",
+    "fixed_code": "def calc(a, b):\n    \"\"\"计算两个数值的和并返回\n\n    Args:\n        a (int/float): 第一个加数\n        b (int/float): 第二个加数\n\n    Returns:\n        int/float: 两个数值的和\n    \"\"\"\n    # 空值与类型校验\n    if a is None or b is None:\n        raise TypeError(\"两个加数均不能为None\")\n    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n        raise TypeError(\"两个加数必须为数值类型（int/float）\")\n    # 将print修改为return返回计算结果\n    return a + b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium-High",
+        "description": "函数使用print替代return，无返回值导致调用方无法获取计算结果，易引发后续逻辑错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将print修改为return返回计算结果"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断a或b是否为None，直接相加会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断a或b是否为可加的数值类型（int/float），直接相加会触发TypeError或产生不符合预期的结果（如字符串拼接）",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的数值类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名calc过于宽泛，未明确表达仅执行加法运算的功能，不符合语义化命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "建议重命名为add_numbers"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-147",
+    "language": "Python",
+    "code": "def mod(a, b):\n    return a % b",
+    "fixed_code": "def mod(a, b):\n    \"\"\"计算两个数值的模运算结果\n\n    Args:\n        a (int/float): 被除数\n        b (int/float): 除数（模数）\n\n    Returns:\n        int/float: 模运算结果\n\n    Raises:\n        ValueError: 当模数b为0时抛出\n        TypeError: 当a或b为None或非数值类型时抛出\n    \"\"\"\n    # 空值与类型校验\n    if a is None or b is None:\n        raise TypeError(\"被除数和除数均不能为None\")\n    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n        raise TypeError(\"被除数和除数必须为数值类型（int/float）\")\n    # 增加模数为0的判断\n    if b == 0:\n        raise ValueError(\"模数不能为0\")\n    return a % b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断模数b是否为0，直接取模会触发ZeroDivisionError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加b==0的判断并抛出明确的ValueError"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断a或b是否为None，直接取模会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断a或b是否为数值类型（int/float），直接取模会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的数值类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-137",
+    "language": "Python",
+    "code": "def read():\n    f = open(\"a.txt\")\n    return f.read()",
+    "fixed_code": "def read_file():\n    \"\"\"安全读取指定文本文件的全部内容\n\n    Returns:\n        str/None: 文件读取成功返回内容字符串，失败返回None\n    \"\"\"\n    # 统一定义具名常量，避免竞态条件之外的硬编码问题\n    TARGET_FILE_PATH = \"a.txt\"\n    \n    # 使用try-except替代os.path.exists（避免TOCTOU竞态条件），覆盖多种文件异常\n    try:\n        with open(TARGET_FILE_PATH, 'r', encoding='utf-8') as f:\n            return f.read()\n    except FileNotFoundError:\n        return None\n    except PermissionError:\n        return None\n    except IsADirectoryError:\n        return None\n    except UnicodeDecodeError:\n        return None",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未检查文件存在性，直接打开会触发FileNotFoundError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用try-except捕获FileNotFoundError（替代os.path.exists避免TOCTOU竞态条件）"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "文件句柄f未显式关闭，存在资源泄漏风险，长时间运行可能耗尽系统文件描述符",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with上下文管理器自动管理文件句柄的打开与关闭"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "文件路径\"a.txt\"硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将硬编码文件路径定义为具名常量统一管理"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名read过于宽泛，未明确表达仅读取\"a.txt\"的功能，不符合语义化命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "建议重命名为read_target_file或read_a_txt"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "未捕获文件读取过程中可能出现的其他异常（如权限错误、目录错误、编码错误）",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用try-except捕获PermissionError、IsADirectoryError、UnicodeDecodeError等相关异常"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-228",
+    "language": "Python",
+    "code": "def g(o):return o.a",
+    "fixed_code": "def get_object_attribute_a(obj):\n    \"\"\"安全获取对象的a属性\n\n    Args:\n        obj (object): 待获取属性的对象\n\n    Returns:\n        Any/None: 对象存在且有a属性返回属性值，否则返回None\n    \"\"\"\n    # 使用try-except替代简单的None判断，避免hasattr触发__getattr__副作用，同时覆盖TypeError/AttributeError\n    try:\n        return obj.a\n    except (TypeError, AttributeError):\n        return None",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium-High",
+        "description": "未判断obj是否为None，直接访问属性会触发TypeError",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用try-except捕获TypeError/AttributeError（替代简单None判断避免副作用）"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名g和参数名o均无明确语义，不符合PEP8命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将函数名改为get_object_attribute_a，参数名改为obj"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-182",
+    "language": "Python",
+    "code": "def get_level(score):\n    if score >= 80:\n        return \"A\"\n    elif score >= 90:\n        return \"S\"\n    return \"B\"",
+    "fixed_code": "def get_score_level(score):\n    \"\"\"根据分数获取对应的等级\n\n    Args:\n        score (int/float): 待评级的分数，需为非负数值\n\n    Returns:\n        str: 等级字符串（S/A/B），输入无效返回\"B\"\n    \"\"\"\n    # 统一定义具名常量，便于后续维护\n    SCORE_THRESHOLD_S = 90\n    SCORE_THRESHOLD_A = 80\n    \n    # 空值与类型校验，输入无效默认返回B\n    if score is None or not isinstance(score, (int, float)) or score < 0:\n        return \"B\"\n    \n    # 调整条件从高到低判断\n    if score >= SCORE_THRESHOLD_S:\n        return \"S\"\n    elif score >= SCORE_THRESHOLD_A:\n        return \"A\"\n    return \"B\"",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "条件判断顺序错误，高分（>=90）会先命中>=80的条件，无法返回S等级",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "调整条件从高到低判断（先判断S等级，再判断A等级）"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断score是否为None，直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加score的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断score是否为数值类型（int/float），直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加score的数值类型校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Low",
+        "description": "未判断score是否为非负数，负数会返回不符合业务预期的B等级",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加score的非负校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "分数阈值80、90硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "将硬编码分数阈值定义为具名常量统一管理"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名get_level过于宽泛，未明确表达仅根据分数评级的功能，不符合语义化命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "建议重命名为get_score_level"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-073",
+    "language": "Python",
+    "code": "def check(a, b):\n    if a > 5:\n        if b < 10:\n            return True\n    return False",
+    "fixed_code": "def check_ab_range(a, b):\n    \"\"\"检查两个数值是否满足a>5且b<10的条件\n\n    Args:\n        a (int/float): 第一个待检查的数值\n        b (int/float): 第二个待检查的数值\n\n    Returns:\n        bool: 满足条件返回True，否则返回False\n    \"\"\"\n    # 统一定义具名常量，便于后续维护\n    MIN_A_THRESHOLD = 5\n    MAX_B_THRESHOLD = 10\n    \n    # 空值与类型校验，输入无效返回False\n    if a is None or b is None or not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n        return False\n    \n    # 合并逻辑判断条件，简化代码\n    return a > MIN_A_THRESHOLD and b < MAX_B_THRESHOLD",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium-High",
+        "description": "嵌套逻辑条件冗余，代码可读性差且易引入逻辑错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "合并逻辑判断条件为a>5 and b<10，简化代码"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断a或b是否为None，直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断a或b是否为数值类型（int/float），直接比较会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加a和b的数值类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "阈值5、10硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "将硬编码阈值定义为具名常量统一管理"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名check过于宽泛，未明确表达检查a>5且b<10的功能，不符合语义化命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "建议重命名为check_ab_range"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-021",
+    "language": "Python",
+    "code": "def check_file_exists(path):\n    f = open(path, \"r\")\n    content = f.read()",
+    "fixed_code": "def check_file_exists(path):\n    try:\n        with open(path, \"r\") as f:\n            return f.read()\n    except FileNotFoundError:\n        return False",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未检查文件是否存在，直接打开会触发FileNotFoundError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用try-except捕获FileNotFoundError（替代os.path.exists避免TOCTOU竞态条件）"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "文件句柄f未显式关闭，存在资源泄漏风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with上下文管理器自动管理文件句柄"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium",
+        "description": "函数名check_file_exists语义为检查存在性，但原代码实际读取文件且无明确返回值",
+        "location": {
+          "line_start": 1,
+          "line_end": 3
+        },
+        "fix_suggestion": "调整函数逻辑为读取文件并返回内容/False，或重命名函数为read_file"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-065",
+    "language": "Python",
+    "code": "def load_data():\n    f = open(\"data.json\", \"r\")\n    content = f.read()\n    return content",
+    "fixed_code": "def load_data():\n    try:\n        with open(\"data.json\", \"r\", encoding='utf-8') as f:\n            return f.read()\n    except FileNotFoundError:\n        return None",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "File Existence Check Missing",
+        "severity": "Medium-High",
+        "description": "未检查文件是否存在，直接打开会触发FileNotFoundError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用try-except捕获FileNotFoundError（替代os.path.exists避免TOCTOU竞态条件）"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "文件句柄f未显式关闭，存在资源泄漏风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用with上下文管理器自动管理文件句柄"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "文件路径\"data.json\"硬编码为魔法常量，后续维护需直接修改业务代码",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将硬编码文件路径定义为具名常量统一管理"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-110",
+    "language": "Python",
+    "code": "def add(a, b):\n    return a + b",
+    "fixed_code": "def add(a: int, b: int) -> int:\n    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n        raise TypeError(\"两个加数必须为数值类型\")\n    return a + b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium-High",
+        "description": "无类型注解，传入非数字会触发类型错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加参数与返回值类型注解"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "无运行时类型校验，传入非数值类型（如字符串）会触发TypeError或产生不符合预期的结果",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加运行时数值类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-050",
+    "language": "Python",
+    "code": "def div(a, b):\n    return a / b",
+    "fixed_code": "def div(a: int, b: int) -> float:\n    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n        raise TypeError(\"被除数和除数必须为数值类型\")\n    if b == 0:\n        raise ZeroDivisionError(\"除数不能为0\")\n    return a / b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium-High",
+        "description": "未判断除数为0，会触发除零异常",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加除数为0的判断与异常抛出"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "无类型注解与运行时类型校验，传入非数值类型会触发TypeError",
+        "location": {
+          "line_start": 1,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加参数与返回值类型注解及运行时数值类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-196",
+    "language": "Python",
+    "code": "def concat_str(a, b):\n    return a + b",
+    "fixed_code": "def concat_str(a: str, b: str) -> str:\n    if not isinstance(a, str) or not isinstance(b, str):\n        raise TypeError(\"两个参数必须为字符串类型\")\n    return a + b",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium-High",
+        "description": "无类型注解，非字符串传入触发类型错误",
+        "location": {
+          "line_start": 1,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加参数与返回值类型注解"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "无运行时类型校验，传入非字符串类型会触发TypeError或产生不符合预期的结果",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加运行时字符串类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-217",
+    "language": "Python",
+    "code": "def eq(a,b):\n    if a=b:return True",
+    "fixed_code": "def eq(a, b):\n    if a == b:\n        return True\n    return False",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "High",
+        "description": "使用赋值运算符=代替比较运算符==，会触发语法错误或逻辑错误",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将=改为=="
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数参数a,b之间缺少空格，不符合PEP8规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "在函数参数a,b之间添加空格"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "条件判断与return语句写在同一行，可读性差，不符合PEP8规范",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将条件判断与return语句分行写"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-020",
+    "language": "Python",
+    "code": "def login(username, password, code, ip, agent, referer, timeout, max_retry):\n    pass",
+    "fixed_code": "from dataclasses import dataclass\n\n@dataclass\nclass LoginParams:\n    username: str\n    password: str\n    code: str\n    ip: str\n    agent: str\n    referer: str\n    timeout: int\n    max_retry: int\n\ndef login(params: LoginParams):\n    pass",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "函数参数超过7个，可读性和可维护性差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用dataclass封装多个参数（比手动写__init__更简洁规范）"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-215",
+    "language": "Python",
+    "code": "def f(a,b,c,d,e,f,g):return a",
+    "fixed_code": "from dataclasses import dataclass\n\n@dataclass\nclass Params:\n    a: any\n\ndef f(p: Params):\n    return p.a",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "函数参数过多，可读性和可维护性差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用dataclass封装实际使用的参数"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名f、参数名a,b,c,d,e,f,g均无明确语义，不符合PEP8规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将函数名和参数名改为有语义的名称"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数定义与return语句写在同一行，可读性差，不符合PEP8规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "将函数定义与return语句分行写"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-213",
+    "language": "Python",
+    "code": "def t():\n    a=10\n    return 1",
+    "fixed_code": "def get_constant_one():\n    return 1",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Low",
+        "description": "变量a未使用",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "删除变量"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名t无明确语义，不符合PEP8命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "重命名为有语义的函数名（如get_constant_one）"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-012",
+    "language": "Python",
+    "code": "def get_discount():\n    return 0.8",
+    "fixed_code": "DISCOUNT_RATE = 0.8\ndef get_discount():\n    return DISCOUNT_RATE",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "代码中使用魔法数0.8，无业务含义，可读性差",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "定义常量替代魔法数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-018",
+    "language": "Python",
+    "code": "def check_file():\n    import os\n    return os.path.exists(\"test.txt\")",
+    "fixed_code": "import os\n\ndef check_file():\n    return os.path.exists(\"test.txt\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Low",
+        "description": "import语句写在函数内部，虽Python有模块缓存但结构不合理，每次调用都会重复执行导入检查",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将import语句移至文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-048",
+    "language": "Python",
+    "code": "def write_file(path, content):\n    f = open(path, 'w')\n    f.write(content)",
+    "fixed_code": "def write_file(path, content):\n    with open(path, 'w', encoding='utf-8') as f:\n        f.write(content)",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Low",
+        "description": "文件流未关闭，存在资源泄漏风险",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用with语句自动关闭文件流"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-139",
+    "language": "Python",
+    "code": "def get_conn():\n    import sqlite3\n    return sqlite3.connect(\"test.db\")",
+    "fixed_code": "import sqlite3\n\ndef get_conn():\n    return sqlite3.connect(\"test.db\")",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Low",
+        "description": "import语句写在函数内部，虽Python有模块缓存但结构不合理，每次调用都会重复执行导入检查",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将import语句移至文件顶部"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-047",
+    "language": "Python",
+    "code": "def calc_area(r):\n    return 3.1415926 * r * r",
+    "fixed_code": "PI = 3.1415926\n\ndef calc_area(r):\n    return PI * r * r",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "圆周率使用魔法数字，无常量定义，可读性差",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "定义PI常量替代魔法数字"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-064",
+    "language": "Python",
+    "code": "def func(x, y, z, a, b, c, d, e):\n    return x + y",
+    "fixed_code": "from dataclasses import dataclass\n\n@dataclass\nclass FuncParams:\n    x: any\n    y: any\n\ndef func(params: FuncParams):\n    return params.x + params.y",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "函数参数数量超过7个，可读性与可维护性差",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用dataclass封装实际使用的参数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-085",
+    "language": "Python",
+    "code": "def is_workday(day):\n    return day != 6 and day != 7",
+    "fixed_code": "SATURDAY = 6\nSUNDAY = 7\n\ndef is_workday(day):\n    return day not in (SATURDAY, SUNDAY)",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "使用魔法数字6/7表示周末，无业务语义",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "定义常量表示周末日期"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-149",
+    "language": "Python",
+    "code": "def huge_function():\n    # 50行逻辑\n    pass",
+    "fixed_code": "def part1():\n    pass\n\ndef part2():\n    pass\n\ndef small_function():\n    part1()\n    part2()",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数过长",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "拆分函数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-134",
+    "language": "Python",
+    "code": "def func():\n    x = 10\n    return 1",
+    "fixed_code": "def get_constant_one():\n    return 1",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Low",
+        "description": "变量x未使用",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "删除变量"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名func过于宽泛，无明确语义，不符合PEP8命名规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "重命名为有语义的函数名（如get_constant_one）"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-130",
+    "language": "Python",
+    "code": "def write(path, data):\n    pass\n\ndef save(data, path):\n    pass",
+    "fixed_code": "def write(path, data):\n    pass\n\nsave = write",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Low",
+        "description": "函数功能重复，仅参数顺序不同",
+        "location": {
+          "line_start": 3,
+          "line_end": 4
+        },
+        "fix_suggestion": "复用函数"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-136",
+    "language": "Python",
+    "code": "def long(a,b,c,d,e,f,g):\n    return a+b",
+    "fixed_code": "from dataclasses import dataclass\n\n@dataclass\nclass Params:\n    a: any\n    b: any\n\ndef short(p):\n    return p.a+p.b",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Low",
+        "description": "参数过多",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "使用参数对象"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-171",
+    "language": "Python",
+    "code": "def super_big_func():\n    # 初始化20行\n    # 业务逻辑30行\n    # 结果处理15行\n    return True",
+    "fixed_code": "def init_data(): pass\n\ndef process_biz(): pass\n\ndef small_func():\n    init_data()\n    process_biz()\n    return True",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数行数过长，逻辑复杂，难以维护",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "拆分为多个小函数，简化逻辑"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-037",
+    "language": "Python",
+    "code": "import requests\n\ndef get_data(url):\n    res = requests.get(url)\n    return res.json()",
+    "fixed_code": "import requests\n\ndef get_data(url, timeout=5):\n    try:\n        res = requests.get(url, timeout=timeout)\n        res.raise_for_status()\n        return res.json()\n    except Exception as e:\n        print(f\"请求失败: {e}\")\n        return None",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Low",
+        "description": "网络请求未捕获异常，未设置超时，程序易崩溃",
+        "location": {
+          "line_start": 3,
+          "line_end": 4
+        },
+        "fix_suggestion": "增加异常捕获、超时设置与错误日志"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-191",
+    "language": "Python",
+    "code": "def is_big(num):\n    return num > 100",
+    "fixed_code": "MAX_LIMIT = 100\n\ndef is_big(num):\n    return num > MAX_LIMIT",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "Low",
+        "description": "使用魔法数字100，无常量定义，可读性差",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "定义常量替代魔法数字"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-169",
+    "language": "Python",
+    "code": "import copy\n\ndef copy_map(data):\n    return copy.deepcopy(data)",
+    "fixed_code": "def copy_map(data):\n    return data.copy()",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "一维字典使用深拷贝，性能浪费，浅拷贝即可",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用字典浅拷贝替代深拷贝"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-013",
+    "language": "Python",
+    "code": "def filter_data(data_list):\n    result = []\n    for i in range(len(data_list)):\n        if data_list[i] > 10:\n            result.append(data_list[i])\n    return result",
+    "fixed_code": "def filter_data(data_list):\n    return [x for x in data_list if x > 10]",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "使用低效for循环遍历列表，性能低于列表推导式",
+        "location": {
+          "line_start": 3,
+          "line_end": 5
+        },
+        "fix_suggestion": "使用列表推导式替代传统循环"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-189",
+    "language": "Python",
+    "code": "def find_item(lst, item):\n    for i in lst:\n        if i == item:\n            return True\n    return False",
+    "fixed_code": "def find_item(s, item):\n    return item in s",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表查找O(n)，效率低于集合查找O(1)",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用set集合存储数据提升查找效率"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-087",
+    "language": "Python",
+    "code": "def search(list_data, target):\n    for item in list_data:\n        if item == target:\n            return True\n    return False",
+    "fixed_code": "def search(set_data, target):\n    return target in set_data",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "使用列表查找，时间复杂度O(n)，应使用集合O(1)",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用set集合替代列表提升查找效率"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-095",
+    "language": "Python",
+    "code": "import re\n\ndef match_code(text):\n    return re.findall(\".*[A-Z]{3}\", text)",
+    "fixed_code": "import re\n\ndef match_code(text):\n    return re.findall(r\"\\b[A-Z]{3}\\b\", text)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Regular Expression",
+        "severity": "Medium",
+        "description": "贪婪匹配导致正则效率极低",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用精准边界匹配替代贪婪匹配"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-183",
+    "language": "Python",
+    "code": "def loop_dict(d):\n    keys = d.keys()\n    for k in keys:\n        print(k, d[k])",
+    "fixed_code": "def loop_dict(d):\n    \"\"\"遍历字典并打印键值对\n\n    Args:\n        d (dict): 待遍历的字典\n    \"\"\"\n    # 空值与类型校验\n    if d is None or not isinstance(d, dict):\n        return\n    # 使用items直接遍历键值对\n    for k, v in d.items():\n        print(k, v)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "先获取keys再遍历，效率低于直接items遍历，且需二次字典索引取值",
+        "location": {
+          "line_start": 3,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用items直接遍历键值对"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断d是否为None，直接调用keys()会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加d的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断d是否为字典类型，直接调用keys()会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加d的字典类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-238",
+    "language": "Python",
+    "code": "def has(l,i):\n    for x in l:\n        if x==i:return True\n    return False",
+    "fixed_code": "def has(s, i):\n    \"\"\"检查元素是否存在于集合中\n\n    Args:\n        s (set): 待检查的集合\n        i (any): 待查找的元素\n\n    Returns:\n        bool: 元素存在返回True，否则返回False\n    \"\"\"\n    # 空值与类型校验\n    if s is None or not isinstance(s, (set, list, tuple)):\n        return False\n    # 使用in关键字直接查找\n    return i in s",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表/元组线性查找O(n)，效率低于集合哈希查找O(1)",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "优先使用set集合存储数据，或使用in关键字替代手动循环"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断l是否为None，直接遍历会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加l的None校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数参数l、i之间缺少空格，且l易与数字1混淆，不符合PEP8规范",
+        "location": {
+          "line_start": 1,
+          "line_end": 1
+        },
+        "fix_suggestion": "在函数参数之间添加空格，将l重命名为s（set）或lst（list）"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "条件判断与return语句写在同一行，可读性差，不符合PEP8规范",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "将条件判断与return语句分行写"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-220",
+    "language": "Python",
+    "code": "import re\ndef m(t):return re.findall(\".*\\d{4}\",t)",
+    "fixed_code": "import re\n\ndef find_four_digit_words(text):\n    \"\"\"查找文本中所有独立的四位数字\n\n    Args:\n        text (str): 待查找的文本\n\n    Returns:\n        list[str]: 所有独立的四位数字列表\n    \"\"\"\n    # 空值与类型校验\n    if text is None or not isinstance(text, str):\n        return []\n    # 使用精准边界匹配替代贪婪匹配\n    return re.findall(r\"\\b\\d{4}\\b\", text)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Regular Expression",
+        "severity": "Medium",
+        "description": "使用.*贪婪匹配，会从文本开头回溯到结尾，正则效率极低",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "使用精准边界匹配\\b替代贪婪匹配"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断t是否为None，直接调用re.findall会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加t的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断t是否为字符串类型，直接调用re.findall会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加t的字符串类型校验"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Non-Standard Naming",
+        "severity": "Low",
+        "description": "函数名m、参数名t均无明确语义，不符合PEP8命名规范",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将函数名改为find_four_digit_words，参数名改为text"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Overly Long Function",
+        "severity": "Low",
+        "description": "函数定义与return语句写在同一行，可读性差，不符合PEP8规范",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将函数定义与return语句分行写"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-103",
+    "language": "Python",
+    "code": "def loop_list(items):\n    i = 0\n    while i < len(items):\n        print(items[i])\n        i += 1",
+    "fixed_code": "def loop_list(items):\n    \"\"\"遍历列表并打印每个元素\n\n    Args:\n        items (list/tuple): 待遍历的可迭代对象\n    \"\"\"\n    # 空值与类型校验\n    if items is None or not isinstance(items, (list, tuple)):\n        return\n    # 使用for-in直接遍历迭代对象\n    for item in items:\n        print(item)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "使用while索引遍历列表，需手动维护索引变量，效率低于for-in遍历",
+        "location": {
+          "line_start": 2,
+          "line_end": 5
+        },
+        "fix_suggestion": "使用for-in直接遍历迭代对象"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断items是否为None，直接调用len()会触发TypeError",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "增加items的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断items是否为可迭代的序列类型，直接调用len()或索引会触发TypeError",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "增加items的序列类型校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-162",
+    "language": "Python",
+    "code": "def find_goods(goods, gid):\n    for g in goods:\n        if g[\"id\"] == gid:\n            return g\n    return None",
+    "fixed_code": "def build_goods_map(goods):\n    \"\"\"将商品列表构建为id到商品的哈希映射\n\n    Args:\n        goods (list[dict]): 商品列表，每个元素为包含\"id\"键的字典\n\n    Returns:\n        dict: id到商品的哈希映射\n    \"\"\"\n    # 空值与类型校验\n    if goods is None or not isinstance(goods, list):\n        return {}\n    # 使用字典推导式构建哈希映射\n    return {g[\"id\"]: g for g in goods if isinstance(g, dict) and \"id\" in g}\n\ndef find_goods(goods_map, gid):\n    \"\"\"根据商品id从哈希映射中查找商品\n\n    Args:\n        goods_map (dict): id到商品的哈希映射\n        gid (any): 待查找的商品id\n\n    Returns:\n        dict/None: 找到的商品字典，未找到返回None\n    \"\"\"\n    # 空值与类型校验\n    if goods_map is None or not isinstance(goods_map, dict):\n        return None\n    # 使用字典get方法查找\n    return goods_map.get(gid)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表线性查找O(n)，效率低于字典哈希查找O(1)，尤其适合多次查找场景",
+        "location": {
+          "line_start": 2,
+          "line_end": 4
+        },
+        "fix_suggestion": "使用字典构建哈希映射提升查询效率"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "未判断goods是否为None，直接遍历会触发TypeError",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "增加goods的None校验"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Type Error",
+        "severity": "Medium",
+        "description": "未判断goods是否为列表类型、g是否为字典类型、g是否包含\"id\"键，直接遍历或索引会触发TypeError/KeyError",
+        "location": {
+          "line_start": 2,
+          "line_end": 3
+        },
+        "fix_suggestion": "增加goods的列表类型校验、g的字典类型校验、g的\"id\"键存在性校验"
+      }
+    ]
+  },
+  {
+    "id": "DATA-PY-100",
+    "language": "Python",
+    "code": "def start_process():\n    import subprocess\n    subprocess.Popen([\"python\", \"server.py\"])",
+    "fixed_code": "import subprocess\nfrom contextlib import contextmanager\n\n@contextmanager\ndef managed_subprocess(args):\n    \"\"\"上下文管理器，自动管理子进程的启动、等待与终止\n\n    Args:\n        args (list): 子进程启动参数列表\n\n    Yields:\n        subprocess.Popen: 子进程对象\n    \"\"\"\n    proc = None\n    try:\n        proc = subprocess.Popen(args)\n        yield proc\n    finally:\n        if proc:\n            if proc.poll() is None:\n                proc.terminate()\n                try:\n                    proc.wait(timeout=5)\n                except subprocess.TimeoutExpired:\n                    proc.kill()\n\ndef start_process():\n    \"\"\"启动并管理Python服务器子进程\"\"\"\n    with managed_subprocess([\"python\", \"server.py\"]) as proc:\n        proc.wait()",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Memory Leak",
+        "severity": "Medium",
+        "description": "子进程未管理，进程结束后可能残留僵尸进程，造成系统资源泄漏",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "使用上下文管理器自动管理子进程的启动、等待与终止"
+      },
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Low",
+        "description": "import语句写在函数内部，虽Python有模块缓存但结构不合理，每次调用都会重复执行导入检查",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "将import语句移至文件顶部"
+      }
+    ]
+  }
+]

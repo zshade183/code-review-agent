@@ -1,0 +1,47 @@
+# Web Framework
+fastapi>=0.104.1
+uvicorn>=0.24.0
+
+# Web 前端（web/app.py）
+streamlit>=1.66.0
+
+# 数据契约 / 结构化输出校验（Agent 结构化输出依赖，FastAPI 已间接引入，这里显式声明）
+pydantic>=2.0
+
+# HTTP Client
+requests>=2.31.0
+
+# Data Processing
+numpy>=1.26.2
+pandas>=2.1.4
+
+# Visualization
+matplotlib>=3.8.2
+
+# Static Analysis（作为 Agent 工具被调用，非必装；缺失时自动跳过对应引擎）
+pylint>=3.0.2
+bandit>=1.7.8
+
+# Utilities
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
+
+# Progress Bar
+tqdm>=4.66.1
+
+# ---------------------------------------------------------------------------
+# 说明：Agent 层（agent/）**没有引入任何新的第三方依赖**。
+# 工具调用、ReAct 循环、SSE 流式、BM25 检索、哈希向量记忆、受限子进程沙箱
+# 全部用标准库 + 上述已有依赖实现。因此 `pip install -r requirements.txt` 后
+# 即可直接运行 CLI / API / MCP Server，无需额外安装。
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# LangGraph 编排层（review_assistant/）的额外依赖
+# 只有使用 `python -m review_assistant.main` 时才需要；上面的 agent/ 与
+# CLI / API / MCP / VSCode 插件都不依赖它们。
+# ---------------------------------------------------------------------------
+langgraph>=1.2.15
+langchain-core>=1.6.10
+langchain-openai>=1.7.2
+# 需要 deepseek provider 时再装：langchain-deepseek>=1.1.1

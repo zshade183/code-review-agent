@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Reports (generated)
+reports/exp*/
+!reports/exp*/.gitkeep
+
+# Data (large files)
+data/raw/*.json
+data/processed/*.json
+# 外部仓库克隆缓存（运行时产物，内含独立 .git，不应进入版本库）
+data/repo_cache/
+# 实验数据集（dataset/ 是正式输入，需要跟着代码一起版本化）
+dataset/**/__pycache__/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+
+# Test outputs
+test_outputs/
+
+# Agent 运行时产物
+traces/
+memory/
+cache/
+reports/agent/

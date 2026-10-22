@@ -1,0 +1,146 @@
+[
+  {
+    "id": "codefuse_django_1",
+    "language": "python",
+    "code": "def get_user(request):\n    user_id = request.GET.get('id')\n    cursor = connection.cursor()\n    cursor.execute('SELECT * FROM users WHERE id = ' + user_id)\n    user = cursor.fetchone()\n    return user",
+    "fixed_code": "def get_user(request):\n    user_id = request.GET.get('id')\n    cursor = connection.cursor()\n    cursor.execute('SELECT * FROM users WHERE id = %s', [user_id])\n    user = cursor.fetchone()\n    return user",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "medium",
+        "description": "Security Vulnerability: SQL Injection",
+        "location": {
+          "line_start": 1,
+          "line_end": 6
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_flask_2",
+    "language": "python",
+    "code": "def process_data(data):\n    result = data['result']\n    return result",
+    "fixed_code": "def process_data(data):\n    result = data.get('result')\n    return result if result else None",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer",
+        "severity": "medium",
+        "description": "Potential Bug: Null Pointer",
+        "location": {
+          "line_start": 1,
+          "line_end": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_requests_3",
+    "language": "python",
+    "code": "import os\nimport sys\n\ndef make_request(url):\n    response = requests.get(url)\n    return response",
+    "fixed_code": "def make_request(url):\n    response = requests.get(url)\n    return response",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "medium",
+        "description": "Code Smell: Unused Variable/Import",
+        "location": {
+          "line_start": 1,
+          "line_end": 6
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_numpy_4",
+    "language": "python",
+    "code": "def calculate_sum(data):\n    total = 0\n    for i in range(len(data)):\n        total += data[i]\n    return total",
+    "fixed_code": "def calculate_sum(data):\n    return sum(data)",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "medium",
+        "description": "Performance Issue: Inefficient Loop",
+        "location": {
+          "line_start": 1,
+          "line_end": 5
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_pandas_5",
+    "language": "python",
+    "code": "def connect_to_db():\n    conn = psycopg2.connect(\n        host='localhost',\n        database='mydb',\n        user='admin',\n        password='secret123'\n    )\n    return conn",
+    "fixed_code": "def connect_to_db():\n    conn = psycopg2.connect(\n        host=os.environ.get('DB_HOST'),\n        database=os.environ.get('DB_NAME'),\n        user=os.environ.get('DB_USER'),\n        password=os.environ.get('DB_PASSWORD')\n    )\n    return conn",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "medium",
+        "description": "Security Vulnerability: Hardcoded Sensitive Information",
+        "location": {
+          "line_start": 1,
+          "line_end": 8
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_scikit-learn_6",
+    "language": "python",
+    "code": "def get_element(data, index):\n    return data[index]",
+    "fixed_code": "def get_element(data, index):\n    if 0 <= index < len(data):\n        return data[index]\n    else:\n        raise IndexError('Index out of bounds')",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "medium",
+        "description": "Potential Bug: Index Out of Bounds",
+        "location": {
+          "line_start": 1,
+          "line_end": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_tensorflow_7",
+    "language": "python",
+    "code": "def normalize(data):\n    return data / 255.0",
+    "fixed_code": "def normalize(data):\n    MAX_PIXEL_VALUE = 255.0\n    return data / MAX_PIXEL_VALUE",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Magic Number",
+        "severity": "medium",
+        "description": "Code Smell: Magic Number",
+        "location": {
+          "line_start": 1,
+          "line_end": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "codefuse_torch_8",
+    "language": "python",
+    "code": "def compute_metrics(y_true, y_pred):\n    accuracy = sum(y_true == y_pred) / len(y_true)\n    precision = sum((y_true == 1) & (y_pred == 1)) / sum(y_pred == 1)\n    recall = sum((y_true == 1) & (y_pred == 1)) / sum(y_true == 1)\n    return accuracy, precision, recall",
+    "fixed_code": "def compute_metrics(y_true, y_pred):\n    true_positives = sum((y_true == 1) & (y_pred == 1))\n    accuracy = sum(y_true == y_pred) / len(y_true)\n    precision = true_positives / sum(y_pred == 1) if sum(y_pred == 1) > 0 else 0\n    recall = true_positives / sum(y_true == 1) if sum(y_true == 1) > 0 else 0\n    return accuracy, precision, recall",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "medium",
+        "description": "Performance Issue: Redundant Calculation",
+        "location": {
+          "line_start": 1,
+          "line_end": 5
+        }
+      }
+    ]
+  }
+]
