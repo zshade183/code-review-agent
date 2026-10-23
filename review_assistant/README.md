@@ -1,29 +1,28 @@
 # review_assistant · LangGraph 版代码审查 Agent
 
-按「旅行助手」项目的设计（LangGraph supervisor + handoff + 敏感工具人工确认）
-一个用 **LangGraph 图编排**的代码审查多智能体系统。它与 `agent/`（手写 ReAct 循环）
+一个用 **LangGraph 图编排**的代码审查多智能体系统：主助手按维度委派、
+子助手只做只读取证、敏感操作在执行前暂停等待确认。它与 `agent/`（手写 ReAct 循环）
 并存，共用同一批工具、数据契约、规则库与长期记忆。
 
-## 1. 文件对照
+## 1. 模块一览
 
-| 旅行助手项目 | 本包 | 作用 |
-|---|---|---|
-| `workflow.py` | `workflow.py` | 建图：主助手、子助手、收集节点、路由、人工确认 |
-| `state.py` | `state.py` | 状态与 reducer（消息、对话栈、结论、已完成维度） |
-| `handoffs.py` | `handoffs.py` | 交接用的 Pydantic 契约 |
-| `llm.py` | `llm.py` | openai / deepseek / mock provider 工厂 |
-| `flight_tools.py` 等 | `toolset.py` + `tool_adapter.py` | 把现有 14 个工具按角色裁剪并适配成 LangChain 工具 |
-| `policy_tools.py` | `policy_tools.py` | `lookup_rule`：规则库检索 |
-| `retriever_vector.py` | `retriever.py` | 规则库 + 项目约定的向量检索（可退化离线） |
-| `main.py` | `main.py` | CLI 入口 + 敏感操作人工确认循环 |
-| — | `dimensions.py` | 审查维度的注册表（本文档的「业务清单」） |
-| — | `findings.py` | 子助手结论的解析与证据校验 |
-| — | `mock_llm.py` | 离线假模型，让整张图无密钥可跑 |
+| 文件 | 作用 |
+|---|---|
+| `workflow.py` | 建图：主助手、子助手、收集节点、路由、人工确认 |
+| `state.py` | 状态与 reducer（消息、对话栈、结论、已完成维度） |
+| `handoffs.py` | 交接用的 Pydantic 契约 |
+| `llm.py` | openai / deepseek / mock provider 工厂 |
+| `toolset.py` + `tool_adapter.py` | 把项目内 14 个工具按角色裁剪并适配成 LangChain 工具 |
+| `policy_tools.py` | `lookup_rule`：规则库检索 |
+| `retriever.py` | 规则库 + 项目约定的向量检索（可退化离线） |
+| `main.py` | CLI 入口 + 敏感操作人工确认循环 |
+| `dimensions.py` | 审查维度的注册表 |
+| `findings.py` | 子助手结论的解析与证据校验 |
+| `mock_llm.py` | 离线假模型，让整张图无密钥可跑 |
 
 ## 2. 角色划分
 
-旅行助手按业务拆子助手（航班 / 酒店 / 租车 / 活动）；代码审查的天然切分维度就是
-既有的四大类问题，与 `agent/schema.py` 的 `Category` 枚举、数据集标签完全一致：
+审查按四大类问题拆分子助手，与 `agent/schema.py` 的 `Category` 枚举、数据集标签完全一致：
 
 | 子助手 | 维度 | 可用工具 |
 |---|---|---|
@@ -37,8 +36,7 @@
 / `lookup_rule` /（配置了代码库根目录后的）`search_codebase`、`read_project_file`、
 `find_symbol_in_project`。
 
-主助手只有 `lookup_rule` + 代码库检索 + 5 个交接工具：**它不下结论、不改代码**，
-这一点和旅行助手里「主助手不能执行业务写入」是同一条约束。
+主助手只有 `lookup_rule` + 代码库检索 + 5 个交接工具：**它不下结论、不改代码**。
 
 ## 3. 一次审查的节点序列
 
@@ -81,7 +79,7 @@ fix_assistant → fix_assistant_safe_tools（check_syntax）
 
 **2）进度显式注入主助手提示词。**
 主助手每轮都能看到「已完成 / 未完成」的维度列表，因此知道该继续委派还是该收口，
-不依赖它自己去翻聊天记录。这与旅行助手把 `user_info` 注入每个助手是同一手法。
+不依赖它自己去翻聊天记录。
 
 **3）安全边界由图的拓扑决定，不由提示词决定。**
 `mutating=True` 的工具被单独挑出来放进 `*_sensitive_tools` 节点，并在 `compile()` 时
@@ -95,7 +93,7 @@ fix_assistant → fix_assistant_safe_tools（check_syntax）
 
 ## 5. 与 `agent/` 的关系
 
-| | `agent/`（原实现） | `review_assistant/`（本包） |
+| | `agent/`（手写循环） | `review_assistant/`（图编排） |
 |---|---|---|
 | 编排 | 手写 ReAct 循环 + 线性流水线 | LangGraph `StateGraph` |
 | 终止 | 八类停止条件（步数/工具数/token/墙钟/…） | 图自然收敛 + `recursion_limit` |
@@ -108,7 +106,7 @@ fix_assistant → fix_assistant_safe_tools（check_syntax）
 
 ## 6. 已知取舍
 
-- **代码要进每次调用的系统消息**：与旅行助手注入 `user_info` 同理，助手必须拿到源码
+- **代码要进每次调用的系统消息**：助手必须拿到源码
   才能把它作为参数传给工具。因此长文件建议把 `--codebase-root` 配上，让助手改用
   `read_project_file` / `search_codebase` 按需读取（`prompts.numbered_code` 默认在
   20000 字符处截断）。

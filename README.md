@@ -396,18 +396,18 @@ reports/                    # 实验结果与图表
 ## 11. LangGraph 多智能体版（`review_assistant/`）
 
 `agent/` 的编排是**手写**的（`agent/runtime.py` 里的 ReAct 循环 + 线性流水线）；
-`review_assistant/` 是同一批工具与数据契约的**图编排**实现，设计对齐「旅行助手」项目：
+`review_assistant/` 是同一批工具与数据契约的**图编排**实现：
 
-| 旅行助手项目 | 本项目（`review_assistant/`） |
+| 组成部分 | 实现 |
 |---|---|
-| `workflow.py`：主助手 + 4 个业务子助手 | 主助手 + 4 个**维度**子助手 + 修复助手 |
-| `handoffs.py`：`ToFlightAssistant` 等 | `ToSecurityAssistant` / `ToBugAssistant` / … |
-| `state.py`：`messages` + `dialog_state` 栈 | 同上，另加 `target` / `issues` / `reviewed_dimensions` |
-| `*_tools.py`：按业务裁剪工具 | `toolset.py`：四个维度只拿**只读**工具 |
-| `safe_tools` / `sensitive_tools` 拆分 | 复用工具的 `mutating` 标记自动分流 |
-| `interrupt_before` 敏感节点 + `main.py` 人工确认 | 执行/改代码前停下来问用户 |
-| `retriever_vector.py` + `policy_tools.py` | `retriever.py` + `policy_tools.py`（规则库 + 项目约定） |
-| `llm.py`：provider 工厂 | 同样支持 openai / deepseek / **mock** |
+| 主助手 | `primary_assistant`：负责委派、规范检索与收口，不下结论、不改代码 |
+| 子助手 | 4 个**维度**子助手 + 1 个修复助手 |
+| 交接 | `handoffs.py` 中的 Pydantic 类（`ToSecurityAssistant` 等） |
+| 状态 | `state.py`：`messages` / `dialog_state` / `target` / `issues` / `reviewed_dimensions` |
+| 工具 | `toolset.py`：按维度裁剪，四个维度只拿**只读**工具 |
+| 人工确认 | 敏感工具走 `interrupt_before`，执行/改代码前停下来问用户 |
+| 规则检索 | `retriever.py` + `policy_tools.py`（规则库 + 项目约定） |
+| 模型接入 | `llm.py`：支持 openai / deepseek / **mock** |
 
 维度划分直接对应数据集标签与 `Category` 枚举：
 安全 / 缺陷 / 坏味 / 性能，各自一个子助手，结论经统一的证据校验后合并。
@@ -428,7 +428,7 @@ python -m review_assistant.main --file demo.py --question "审查这个文件" -
 python test/test_review_assistant.py
 ```
 
-模型后端自动选择：填了 `LLM_API_KEY`/`LLM_MODEL`（或沿用旧的 `API_KEY`/`MODEL_NAME`）
+模型后端自动选择：填了 `LLM_API_KEY`/`LLM_MODEL`（或使用通用的 `API_KEY`/`MODEL_NAME`）
 就走真实模型，否则自动退化为离线 mock；也可以用 `--mock` / `--provider` 显式指定。
 
 详细设计与文件对照见 **[review_assistant/README.md](review_assistant/README.md)**；

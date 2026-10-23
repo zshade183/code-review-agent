@@ -1,5 +1,8 @@
 # 代码审查 Agent
 
+> **文档导航**：从零跑通看 [start.md](start.md)，整体架构与用法看 [README.md](README.md)，
+> 本文按模块逐节说明 LangGraph 版的实现。
+
 **项目背景**：随着大语言模型的发展，传统的代码审查工具（规则引擎 + 一次性提示词调用）已难以满足真实场景的需求：
 同一段代码在静态分析工具里会报出大量误报，判断哪条成立需要结合上下文取证；修复建议是否可用，必须真的跑一遍才知道。
 为此，本项目基于 **LangChain + LangGraph** 框架实现了一套多 Agent + WorkFlow 的智能代码审查助手，
@@ -13,15 +16,15 @@
 **项目实现**：
 主要包括业务工具模块、审查对象与上下文准备模块、多 Agent 调度模块、状态管理模块。
 
-1. **工具函数模块**：把项目原有的 14 个代码能力（规则引擎 / pylint / bandit 静态分析、AST 大纲与签名比对、代码库 BM25 检索、补丁生成与应用、受限沙箱执行、规则库检索）统一封装为 LangChain 工具；依据风险划分为「只读工具」与「敏感工具」，按审查维度绑定到不同子助手，使大模型能够动态触发工具调用。
+1. **工具函数模块**：把项目内的 14 个代码能力（规则引擎 / pylint / bandit 静态分析、AST 大纲与签名比对、代码库 BM25 检索、补丁生成与应用、受限沙箱执行、规则库检索）统一封装为 LangChain 工具；依据风险划分为「只读工具」与「敏感工具」，按审查维度绑定到不同子助手，使大模型能够动态触发工具调用。
 2. **审查对象与上下文准备模块**：主助手一开始就通过节点 `load_target` 从请求参数 `config.configurable` 中获取待审查文件路径，读取源码并连同行号保存在 `State` 中；借助 `InMemorySaver()` 保存上下文，即使中途因人工确认而中断，也能通过 `thread_id` 恢复同一轮审查。
 3. **多 Agent 调度模块**：把代码审查细分为五条子工作流，由一个主 Agent 居中调度。每个子工作流是一个独立的 Agent，负责各自的维度，分为：安全审查助手、缺陷审查助手、规范与坏味审查助手、性能审查助手、修复助手。每个子工作流包含五个节点：入口节点（`make_entry_node`）、决策节点（带大模型的节点）、只读工具节点、敏感工具节点、离开当前任务节点（所有子助手共用）；其中只有修复助手存在敏感工具节点，四个审查维度助手只持有只读工具。主工作流到子工作流的调度通过动态路由条件 `add_conditional_edges` 实现；子工作流回主工作流通过控制 `State` 中的 `update_dialog_stack` 管理。
 4. **状态管理模块**：整个模块是 `ReviewState`，保存工作流中的 `messages`（历史消息列表）、`target`（审查对象）、`issues`（已收集的结论）、`reviewed_dimensions`（已完成的维度）以及工作流状态栈 `dialog_state`。
 
-> 说明：本项目同时存在两套编排实现。
-> `agent/` 是**手写 ReAct 循环**版本（自研 Agent Runtime，八类停止条件、文本 ReAct 降级、三级验证）；
-> `review_assistant/` 是本文档介绍的 **LangGraph 图编排**版本，两者共用同一批工具、数据契约、
-> 规则库与长期记忆，可以对照阅读。本文档聚焦后者。
+> 说明：本项目提供两种编排实现。
+> `agent/` 是**手写 ReAct 循环**（自研 Agent Runtime，八类停止条件、文本 ReAct 降级、三级验证）；
+> `review_assistant/` 是本文档介绍的 **LangGraph 图编排**。两者共用同一批工具、数据契约、
+> 规则库与长期记忆，可以对照阅读；本文档聚焦后者。
 
 ---
 
@@ -151,7 +154,7 @@ class CompleteOrEscalate(BaseModel):
 
 ## 1.7 规则库检索工具
 
-对应旅行助手的 `lookup_policy`。语料是内置的审查规则库（`core/prompts.py` 的 `REVIEW_RULES`）
+语料是内置的审查规则库（`core/prompts.py` 的 `REVIEW_RULES`）
 加上通过 CLI 写入的项目约定记忆，用向量检索取最相关的几段：
 
 ```python
@@ -180,7 +183,7 @@ def lookup_rule(query: str) -> str:
 
 ## 1.8 工具适配器：把已有工具接进 LangGraph
 
-项目原有的 14 个工具是自定义的 `Tool` 抽象（`name` / `description` / `parameters` / `run`），
+项目内的 14 个工具是自定义的 `Tool` 抽象（`name` / `description` / `parameters` / `run`），
 而 LangGraph 的 `ToolNode` 需要 LangChain 的 `BaseTool`。`tool_adapter.py` 做一层薄适配，**原工具一行都不用改**：
 
 ```python
@@ -471,8 +474,7 @@ def build_system_content(
 ) -> str:
     """组装系统消息：公共约束 + 角色提示词 + 运行态上下文。
 
-    与旅行助手把 ``user_info`` 注入每个助手是同一手法：把「当前事实」放进系统消息，
-    模型每轮都能看到最新状态，不需要自己去翻聊天记录。
+    把「当前事实」放进系统消息，模型每轮都能看到最新状态，不需要自己去翻聊天记录。
     """
     path = target.get("path") or "（未指定文件）"
     code = target.get("code") or ""
@@ -647,7 +649,7 @@ def make_entry_node(assistant_name: str) -> Callable[[ReviewState], Dict[str, An
 
 ```python
 def leave_skill(state: ReviewState) -> Dict[str, Any]:
-    """子助手主动交回主助手（对应旅行助手的 ``leave_skill``）。"""
+    """子助手主动交回主助手。"""
     message = _last_message(state)
     call = (getattr(message, "tool_calls", None) or [{}])[0]
     reason = (call.get("args") or {}).get("reason", "")
@@ -663,10 +665,9 @@ def leave_skill(state: ReviewState) -> Dict[str, Any]:
     }
 ```
 
-## 4.3 定义收集节点（本项目相对旅行助手最关键的改动）
+## 4.3 定义收集节点（结论校验与合并）
 
-旅行助手的子助手返回的是**工具执行结果**（订单建好了、航班改了）；
-代码审查的子助手返回的是**结论**（我认为第 12 行有除零风险）。
+子助手返回的是**结论**（例如「第 12 行有除零风险」），而不是工具执行结果；
 结论是模型生成的，天然可能编造，所以中间必须插一道校验闸门——这就是收集节点。
 
 子助手输出无工具调用的最终文本后，路由把它送到 `collect_<assistant>`，
@@ -705,7 +706,7 @@ def make_collect_node(assistant_name: str) -> Callable[[ReviewState], Dict[str, 
     return collect
 ```
 
-校验规则写在 `findings.py`（原项目「证据闭环」的落点）：
+校验规则写在 `findings.py`（证据闭环的落点）：
 
 ```python
 def validate_issues(
@@ -883,7 +884,7 @@ PRIMARY_PROMPT = """
 
 ## 5.5 主助手的路由函数
 
-与旅行助手的差异在于：本项目的路由需要识别**五类交接**，并且要防止
+主助手的路由需要识别**五类交接**，并且要防止
 「所有维度都做完了，主助手还在继续派活」这种空转。为此加了一个 `all_done_hint` 提示节点，
 并在连续两次提示后直接收口：
 
@@ -929,7 +930,7 @@ builder = StateGraph(ReviewState)
 
 ```python
 def load_target(state: ReviewState, config: RunnableConfig) -> Dict[str, Any]:
-    """确认审查对象（对应旅行助手的 ``fetch_user_info``）。
+    """确认审查对象。
 
     审查对象在第一次运行时从 ``config.configurable["target_path"]`` 读取并缓存进状态；
     之后每轮工具调用回到这里时直接跳过，避免重复读盘。
@@ -1050,7 +1051,7 @@ def make_router(
 
 ```python
 def reject_tool_calls(state: ReviewState) -> Dict[str, Any]:
-    """一次想调多个工具时全部拒绝（与旅行助手同样的代码层面兜底）。"""
+    """一次想调多个工具时全部拒绝：路由层保证每轮只执行一个工具。"""
     message = _last_message(state)
     calls = getattr(message, "tool_calls", None) or []
     return {
@@ -1067,7 +1068,7 @@ def reject_tool_calls(state: ReviewState) -> Dict[str, Any]:
 ## 6.6 汇总节点
 
 主助手输出最终总结文本后，路由把它送到 `finalize_report`：
-去重、可选的长期记忆压制（复用原项目的误报记忆）、产出结构化报告。
+去重、可选的长期记忆压制（复用长期记忆中的误报形态）、产出结构化报告。
 
 ```python
         report = ReviewReport(review_summary=_last_text(state), issues=issues).dedupe()
@@ -1237,11 +1238,13 @@ def _primary(self, messages: Sequence[BaseMessage], system: str) -> AIMessage:
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate            # Windows
-pip install -r requirements.txt   # 含 langgraph / langchain-core / langchain-openai
+.\.venv\Scripts\Activate.ps1      # Windows PowerShell
+pip install -r requirements.txt   # 含 langgraph / langchain-core / langchain-openai / streamlit
 ```
 
-## 8.2 三种运行方式
+需要 Python 3.10+（推荐 3.12）。
+
+## 8.2 常用命令
 
 ```bash
 # 离线跑通全流程（不需要任何 API Key）
@@ -1262,7 +1265,7 @@ python test/test_review_assistant.py
 | 变量 | 作用 |
 |---|---|
 | LLM_PROVIDER | `openai` / `deepseek` / `mock`；留空时按密钥是否配置自动判断 |
-| LLM_MODEL、LLM_API_KEY、LLM_BASE_URL | 模型接入；不填则回落读取旧的 `MODEL_NAME` / `API_KEY` / `API_URL` |
+| LLM_MODEL、LLM_API_KEY、LLM_BASE_URL | 模型接入；不填则回落读取通用变量 `MODEL_NAME` / `API_KEY` / `API_URL` |
 | LLM_TEMPERATURE、LLM_EXTRA_BODY | 采样温度与网关额外参数 |
 | EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL | 规则库检索用的向量服务；不配则退化为离线哈希向量 |
 | AGENT_ENABLE_SANDBOX | 是否注册沙箱工具（`execute_python_code` / `run_tests`） |
@@ -1279,7 +1282,7 @@ python test/test_review_assistant.py
 
 同一批工具、同一份数据契约，两种编排范式：
 
-| | `agent/`（原实现） | `review_assistant/`（本项目） |
+| | `agent/`（手写循环） | `review_assistant/`（图编排） |
 |---|---|---|
 | 编排方式 | 手写 ReAct 循环 + 线性流水线 | LangGraph `StateGraph` |
 | 谁决定下一步 | Python 代码里的循环与 `if` | 图的拓扑 + 模型给出的工具调用 |
@@ -1298,7 +1301,7 @@ python test/test_review_assistant.py
 
 # 10 已知取舍
 
-1. **代码要进每次调用的系统消息**：与旅行助手注入 `user_info` 同理，助手必须拿到源码才能把它作为参数传给工具。
+1. **代码要进每次调用的系统消息**：助手必须拿到源码才能把它作为参数传给工具。
    因此长文件建议配置 `--codebase-root`，让助手改用 `read_project_file` / `search_codebase` 按需读取
    （`numbered_code` 默认在 20000 字符处截断）。
 2. **一次只允许一个工具调用**：路由节点会拒绝「一轮多个调用」，让交接与状态流转可预测，代价是长任务需要更多轮次。
