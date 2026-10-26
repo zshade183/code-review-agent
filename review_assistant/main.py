@@ -74,7 +74,7 @@ def make_config(
             "project": project,
             "use_memory": use_memory,
         },
-        "recursion_limit": recursion_limit,
+        "recursion_limit": recursion_limit, 
     }
 
 
@@ -179,6 +179,7 @@ def render_text(result: Dict[str, Any]) -> str:
             f"｜高风险 {stats.get('high_risk', 0)} 条"
             f"｜未核实 {stats.get('unverified', 0)} 条"
             f"｜记忆压制 {stats.get('suppressed_by_memory', 0)} 条"
+            f"｜规范外候选 {stats.get('out_of_spec', 0)} 条"
         )
 
     lines.append("")
@@ -186,6 +187,8 @@ def render_text(result: Dict[str, Any]) -> str:
         lines.append("未发现带证据支撑的问题。")
     for index, issue in enumerate(issues, start=1):
         flag = "" if issue.get("verified") is not False else "（证据不足）"
+        if issue.get("subtype_valid") is False:
+            flag += f"（规范外候选：{issue.get('suggested_subtype') or issue.get('subtype')}）"
         lines.append(
             f"{index}. [{issue.get('category')} / {issue.get('severity')}] "
             f"行 {issue.get('line_number')}：{issue.get('risk_description')}{flag}"

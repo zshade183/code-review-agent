@@ -222,6 +222,118 @@ class MemoryStore:
             )
         )
 
+    # ---------- 规范外候选子类型 ----------
+
+    def record_subtype_candidate(
+        self, project: str, issue: Issue, note: str = ""
+    ) -> Optional[MemoryRecord]:
+        """记录一条「规范外问题」的候选子类型，供后续人工晋升。
+
+        同一项目下同一 ``(分类, 子类型)`` 只落一条，避免每轮审查都重复堆积；
+        返回新写入的记录，已存在时返回 ``None``。
+        """
+        self.ensure_loaded()
+        category = issue.category.value
+        subtype = (issue.suggested_subtype or issue.subtype).strip()
+        if not subtype:
+            return None
+        signature = hashlib.sha256(f"{category}|{subtype}".lower().encode("utf-8")).hexdigest()[:16]
+        for record in self._records:
+            if record.kind != "subtype_candidate" or record.project != project:
+                continue
+            if record.signature == signature:
+                return None
+        return self.append(
+            MemoryRecord(
+                kind="subtype_candidate",
+                project=project,
+                text=(note or issue.risk_description or subtype).strip(),
+                signature=signature,
+                payload={
+                    "category": category,
+                    "subtype": subtype,
+                    "severity": issue.severity.value,
+                    "line": issue.line_start,
+                    "description": issue.risk_description,
+                },
+            )
+        )
+
+    def subtype_candidates(
+        self, project: str = "default", min_count: int = 1
+    ) -> List[Dict[str, Any]]:
+        """按 ``(分类, 子类型)`` 聚合候选，按出现次数降序返回。"""
+        self.ensure_loaded()
+        groups: Dict[Tuple[str, str], List[MemoryRecord]] = {}
+        for record in self._records:
+            if record.kind != "subtype_candidate":
+                continue
+            if project != "default" and record.project not in (project, "default"):
+                continue
+            category = str(record.payload.get("category") or "")
+            subtype = str(record.payload.get("subtype") or record.text or "").strip()
+            if not category or not subtype:
+                continue
+            groups.setdefault((category, subtype), []).append(record)
+
+        results: List[Dict[str, Any]] = []
+        for (category, subtype), records in groups.items():
+            if len(records) < min_count:
+                continue
+            times = [record.created_at for record in records]
+            results.append(
+                {
+                    "category": category,
+                    "subtype": subtype,
+                    "count": len(records),
+                    "projects": sorted({record.project for record in records}),
+                    "samples": [record.text for record in records if record.text][:3],
+                    "first_seen": time.strftime("%Y-%m-%d %H:%M", time.localtime(min(times))),
+                    "last_seen": time.strftime("%Y-%m-%d %H:%M", time.localtime(max(times))),
+                }
+            )
+        results.sort(key=lambda item: (-item["count"], item["category"], item["subtype"]))
+        return results
+
+    def promote_subtype(
+        self, project: str, category: str, subtype: str
+    ) -> MemoryRecord:
+        """把候选子类型晋升为白名单项（人工确认后调用）。
+
+        写入 ``kind="subtype_whitelist"`` 记忆后立即刷新运行期允许集合，
+        后续审查同一进程内即可按规范内问题对待。
+        """
+        self.ensure_loaded()
+        subtype = re.sub(r"\s+", " ", str(subtype or "")).strip()
+        category_text = str(category or "").strip()
+        if not subtype or not category_text:
+            raise ValueError("category 和 subtype 均不能为空")
+        payload = {
+            "category": category_text,
+            "subtype": subtype,
+            "source": "manual_promotion",
+        }
+        for record in self._records:
+            if record.kind != "subtype_whitelist":
+                continue
+            if (
+                str(record.payload.get("category") or "") == category_text
+                and str(record.payload.get("subtype") or record.text or "").strip() == subtype
+            ):
+                return record
+        record = self.append(
+            MemoryRecord(
+                kind="subtype_whitelist",
+                project=project,
+                text=subtype,
+                payload=payload,
+            )
+        )
+        from agent.schema import refresh_allowed_subtypes
+
+        refresh_allowed_subtypes()
+        return record
+
     # ---------- 召回 ----------
 
     def _vector(self, record: MemoryRecord) -> List[float]:

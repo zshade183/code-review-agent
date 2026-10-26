@@ -91,6 +91,50 @@ SUBTYPE_WHITELIST: Dict[Category, tuple[str, ...]] = {
 }
 
 
+#: 运行期允许集合缓存：静态白名单 + 人工晋升的候选子类型
+_EXTRA_SUBTYPES: Optional[Dict[Category, set[str]]] = None
+
+
+def refresh_allowed_subtypes() -> None:
+    """清空运行期缓存，使下次校验重新读取已晋升的子类型。"""
+    global _EXTRA_SUBTYPES
+    _EXTRA_SUBTYPES = None
+
+
+def _extra_subtypes() -> Dict[Category, set[str]]:
+    """读取人工晋升的子类型（长期记忆 ``kind="subtype_whitelist"``）。
+
+    这里延迟导入 ``MemoryStore``，避免 ``schema <- memory`` 的循环依赖；
+    记忆不可用时静默退回静态白名单，核心校验始终可用。
+    """
+    global _EXTRA_SUBTYPES
+    if _EXTRA_SUBTYPES is not None:
+        return _EXTRA_SUBTYPES
+    extra: Dict[Category, set[str]] = {}
+    try:
+        from agent.memory import MemoryStore
+
+        for record in MemoryStore().records:
+            if record.kind != "subtype_whitelist":
+                continue
+            subtype = str(record.payload.get("subtype") or record.text or "").strip()
+            if subtype:
+                extra.setdefault(_normalize_category(record.payload.get("category")), set()).add(subtype)
+    except Exception:  # noqa: BLE001 - 记忆只是增强，失败时退回静态白名单
+        extra = {}
+    _EXTRA_SUBTYPES = extra
+    return extra
+
+
+def allowed_subtypes(category: Category) -> tuple[str, ...]:
+    """某分类当前允许的二级分类：静态白名单 + 已晋升候选。"""
+    if not isinstance(category, Category):
+        category = _normalize_category(category)
+    base = SUBTYPE_WHITELIST.get(category, ())
+    extra = sorted(_extra_subtypes().get(category, set()) - set(base))
+    return tuple(base) + tuple(extra)
+
+
 def _normalize_category(value: Any) -> Category:
     """把 LLM 可能输出的各种写法归一到四大类。"""
     if isinstance(value, Category):
@@ -170,6 +214,8 @@ class Issue(BaseModel):
     category: Category
     severity: Severity
     subtype: str
+    #: 规范外问题的建议分类名。subtype 无法落入白名单时填写，作为白名单候选保留
+    suggested_subtype: str = ""
     line_start: int = Field(default=1, ge=1)
     line_end: int = Field(default=1, ge=1)
     violated_rule: str = ""
@@ -214,8 +260,11 @@ class Issue(BaseModel):
                 end = _parse_line_range(data.get("line_end"))[0]
             data["line_start"], data["line_end"] = min(start, end), max(start, end)
 
-        if not data.get("subtype"):
-            data["subtype"] = str(data.get("violated_rule") or "").strip()
+        if not data.get("subtype") or str(data.get("subtype")).strip() == "Unspecified":
+            data["subtype"] = (
+                str(data.get("suggested_subtype") or "").strip()
+                or str(data.get("violated_rule") or "").strip()
+            )
         if not data.get("risk_description"):
             data["risk_description"] = str(
                 data.get("description") or data.get("risk") or ""
@@ -229,6 +278,11 @@ class Issue(BaseModel):
     def _keep_subtype_readable(cls, value: str) -> str:
         text = re.sub(r"\s+", " ", str(value or "")).strip()
         return text or "Unspecified"
+
+    @field_validator("suggested_subtype")
+    @classmethod
+    def _keep_suggested_readable(cls, value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()
 
     # ---------- 派生属性 ----------
 
@@ -248,7 +302,11 @@ class Issue(BaseModel):
         return self.category.value
 
     def is_subtype_valid(self) -> bool:
-        return self.subtype in SUBTYPE_WHITELIST.get(self.category, ())
+        """subtype 与建议分类是否都落在当前允许集合内（含已晋升项）。"""
+        allowed = allowed_subtypes(self.category)
+        if self.subtype not in allowed:
+            return False
+        return not self.suggested_subtype or self.suggested_subtype in allowed
 
     def identity(self) -> tuple[str, str, int]:
         """去重用的身份标识。"""
@@ -261,6 +319,8 @@ class Issue(BaseModel):
             "dimension": self.category.value,
             "severity": self.severity.value,
             "subtype": self.subtype,
+            "subtype_valid": self.is_subtype_valid(),
+            "suggested_subtype": self.suggested_subtype,
             "line_number": self.line_number,
             "violated_rule": self.violated_rule or self.subtype,
             "risk_level": self.risk_level,
@@ -269,6 +329,7 @@ class Issue(BaseModel):
             "confidence": self.confidence,
             "produced_by": self.produced_by,
             "verified": self.verified,
+            "verify_note": self.verify_note,
             "evidence": [e.model_dump() for e in self.evidence],
         }
 

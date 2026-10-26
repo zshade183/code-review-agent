@@ -73,7 +73,7 @@ class Toolset:
 def _pick(converted: Dict[str, RegistryTool], names: Sequence[str]) -> List[RegistryTool]:
     return [converted[name] for name in names if name in converted]
 
-
+#: 按角色装配工具。
 def build_toolset(codebase_root: Optional[str] = None) -> Toolset:
     """按角色装配工具。"""
     from review_assistant.policy_tools import lookup_rule

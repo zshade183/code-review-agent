@@ -81,14 +81,24 @@ def validate_issues(
             if not evidence.is_verifiable():
                 problems.append("证据既无工具来源也无代码片段")
 
+        # 「分类不在白名单」属于分类待确认，不算证据不足，单独由 subtype_valid 表达
+        evidence_ok = not problems
         if not issue.is_subtype_valid():
-            problems.append(f"subtype '{issue.subtype}' 不在 {expected_category.value} 的允许集合内")
+            # 规范外问题不丢弃：记录建议分类名，作为动态白名单的候选保留到最终报告
+            if not issue.suggested_subtype and issue.subtype not in ("", "Unspecified"):
+                issue.suggested_subtype = issue.subtype
+            label = issue.suggested_subtype or issue.subtype
+            problems.append(
+                f"分类 '{issue.subtype}' 未落入 {expected_category.value} 的允许集合"
+                f"（候选：{label}），已作为规范外问题保留"
+            )
 
-        issue.verified = not problems
+        issue.verified = evidence_ok
         issue.verify_note = "；".join(problems)
         if problems:
             issue.confidence = min(issue.confidence, 0.5)
-            notes.append(f"第 {index} 条证据不足：{issue.verify_note}")
+            prefix = "未完全核实" if not evidence_ok else "分类待确认"
+            notes.append(f"第 {index} 条{prefix}：{issue.verify_note}")
 
         kept.append(issue.model_dump(mode="json"))
 

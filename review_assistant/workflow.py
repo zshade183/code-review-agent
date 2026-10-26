@@ -17,7 +17,7 @@
 编排全部由图表达：谁在什么时候说话、子助手之间怎么交接、
 哪些工具要停下来问用户，都由节点、边与状态决定。
 """
-
+ 
 from __future__ import annotations
 
 import ast
@@ -409,24 +409,45 @@ def make_finalize_node() -> Callable[..., Dict[str, Any]]:
         report = ReviewReport(review_summary=_last_text(state), issues=issues).dedupe()
 
         suppressed: List[Dict[str, Any]] = []
+        recorded_candidates = 0
         configurable = (config or {}).get("configurable", {}) or {}
         if configurable.get("use_memory", True) and report.issues:
             try:
                 from agent.memory import MemoryStore
 
                 store = MemoryStore()
+                project = str(configurable.get("project") or "default")
+                in_spec = [issue for issue in report.issues if issue.is_subtype_valid()]
                 kept, suppressed = store.apply_suppression(
-                    str(configurable.get("project") or "default"),
-                    report.issues,
+                    project,
+                    in_spec,
                     (state.get("target") or {}).get("code") or "",
                 )
-                report = ReviewReport(review_summary=report.review_summary, issues=kept)
+                # 规范外候选免于记忆压制：它们尚未进入白名单，历史误报样本不能代表这一类问题
+                kept_identities = {issue.identity() for issue in kept}
+                report = ReviewReport(
+                    review_summary=report.review_summary,
+                    issues=[
+                        issue
+                        for issue in report.issues
+                        if not issue.is_subtype_valid()
+                        or issue.identity() in kept_identities
+                    ],
+                )
+                for issue in report.issues:
+                    if issue.is_subtype_valid():
+                        continue
+                    if store.record_subtype_candidate(project, issue):
+                        recorded_candidates += 1
             except Exception as exc:  # noqa: BLE001 - 记忆不可用不应影响出报告
                 _log(f"[汇总] 记忆压制跳过：{exc}")
 
+        out_of_spec = [issue for issue in report.issues if not issue.is_subtype_valid()]
         summary = report.review_summary.strip() or f"共发现 {len(report.issues)} 个问题"
         if suppressed:
             summary += f"（记忆库压制 {len(suppressed)} 条历史误报形态）"
+        if out_of_spec:
+            summary += f"（其中 {len(out_of_spec)} 条为规范外候选，待人工确认后可晋升白名单）"
 
         fix = state.get("fix") or {}
         payload = {
@@ -439,6 +460,8 @@ def make_finalize_node() -> Callable[..., Dict[str, Any]]:
                 "high_risk": sum(1 for issue in report.issues if issue.risk_level == "高"),
                 "unverified": sum(1 for issue in report.issues if issue.verified is False),
                 "suppressed_by_memory": len(suppressed),
+                "out_of_spec": len(out_of_spec),
+                "new_subtype_candidates": recorded_candidates,
             },
         }
         _log(f"\n[汇总] 共 {len(report.issues)} 条结论，已生成结构化报告")

@@ -16,6 +16,8 @@
        python cli.py stats                    # 聚合统计（步数/token/成本/工具分布）
        python cli.py memory add <text>        # 写入项目约定记忆
        python cli.py memory list              # 查看记忆库
+       python cli.py candidates list          # 查看规范外候选子类型
+       python cli.py candidates promote ...   # 把候选晋升进白名单
 
 说明：无子命令调用同样走 Agent 管线，**输出结构与退出码保持不变**，CI 集成脚本依赖这一点。
 """
@@ -32,7 +34,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from agent.trace import TraceStore, iter_run_lines  # noqa: E402
 
-SUBCOMMANDS = {"review", "optimize", "multi", "trace", "traces", "stats", "memory"}
+SUBCOMMANDS = {
+    "review",
+    "optimize",
+    "multi",
+    "trace",
+    "traces",
+    "stats",
+    "memory",
+    "candidates",
+}
 
 
 def _read_file(path: str) -> str:
@@ -62,6 +73,11 @@ def _render_review_text(name: str, report: Any, run: Any) -> str:
             f"{index}. [{issue.dimension}] Line {issue.line_number}: {issue.risk_description}"
         )
         lines.append(f"   Severity: {issue.severity.value}  Confidence: {issue.confidence:.2f}")
+        if not issue.is_subtype_valid():
+            lines.append(
+                f"   规范外候选: {issue.suggested_subtype or issue.subtype}"
+                f"（不在 {issue.dimension} 白名单，确认后可执行 candidates promote）"
+            )
         lines.append(f"   Suggestion: {issue.fix_suggestion}")
         for evidence in issue.evidence:
             source = evidence.tool or evidence.kind
@@ -165,6 +181,7 @@ def _print_subcommands() -> None:
     print("  traces              列出历史运行")
     print("  stats               聚合统计")
     print("  memory   （add|list）长期记忆管理")
+    print("  candidates（list|promote）规范外候选子类型管理")
 
 
 def cmd_review(argv: List[str]) -> int:
@@ -371,6 +388,51 @@ def cmd_memory(argv: List[str]) -> int:
     return 0
 
 
+def cmd_candidates(argv: List[str]) -> int:
+    parser = argparse.ArgumentParser(prog="cli.py candidates", description="规范外候选子类型管理")
+    parser.add_argument("action", choices=["list", "promote"])
+    parser.add_argument("extra", nargs="*", help="promote 时依次为 <category> <subtype>")
+    parser.add_argument("--project", default="default")
+    parser.add_argument("--min-count", type=int, default=1, help="list 时只显示出现次数不少于该值的候选")
+    args = parser.parse_args(argv)
+
+    from agent.memory import MemoryStore
+    from agent.schema import Category, allowed_subtypes
+
+    store = MemoryStore()
+    if args.action == "list":
+        candidates = store.subtype_candidates(args.project, args.min_count)
+        if not candidates:
+            print("暂无规范外候选子类型。")
+            return 0
+        print(f"规范外候选子类型（共 {len(candidates)} 项）：")
+        for item in candidates:
+            print(
+                f"  {item['count']} 次  [{item['category']}] {item['subtype']}"
+                f"  最近 {item['last_seen']}"
+            )
+            for sample in item["samples"]:
+                print(f"      例：{sample[:100]}")
+        print(
+            "\n确认是真实问题后，可执行：\n"
+            '  python cli.py candidates promote "<分类>" "<子类型>"'
+        )
+        return 0
+
+    if len(args.extra) < 2:
+        print('用法：python cli.py candidates promote "<分类>" "<子类型>"')
+        return 1
+    category, subtype = args.extra[0], args.extra[1]
+    names = {item.value for item in Category}
+    if category not in names:
+        print(f"分类必须为以下之一：{', '.join(sorted(names))}")
+        return 1
+    record = store.promote_subtype(args.project, category, subtype)
+    print(f"已晋升白名单：{category} / {subtype}（记忆 {record.id}）")
+    print(f"当前允许集合：{', '.join(allowed_subtypes(Category(category)))}")
+    return 0
+
+
 HANDLERS = {
     "review": cmd_review,
     "optimize": cmd_optimize,
@@ -379,6 +441,7 @@ HANDLERS = {
     "traces": cmd_traces,
     "stats": cmd_stats,
     "memory": cmd_memory,
+    "candidates": cmd_candidates,
 }
 
 

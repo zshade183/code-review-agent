@@ -181,6 +181,11 @@ def lookup_rule(query: str) -> str:
 索引后端自动选择：配了 `EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL` 就走真实向量服务，
 否则退化为 `HashingEmbedder`（词项哈希向量）+ 余弦相似度——完全离线、零成本、结果可复现。
 
+只有经过人工确认的 `convention` 记忆会进入检索语料。规范外候选（`subtype_candidate`）
+只是「待确认的观察」，不会被 `lookup_rule` 当成规则依据；确认后用
+`python cli.py candidates promote` 晋升，才会通过 `subtype_whitelist` 进入允许集合
+（详见 4.3 节「规范外问题：候选子类型与动态白名单」）。
+
 ## 1.8 工具适配器：把已有工具接进 LangGraph
 
 项目内的 14 个工具是自定义的 `Tool` 抽象（`name` / `description` / `parameters` / `run`），
@@ -725,7 +730,7 @@ def validate_issues(
 | 行号超出源码范围 | 丢弃（首行越界的直接丢，尾行越界的裁剪到末行） |
 | 没有 `evidence` | **丢弃**（不是降权，是丢弃） |
 | 声称证据来自某工具，但该工具本轮没被调用过 | 保留但标记未核实、置信度压到 0.5 以下 |
-| `subtype` 不在该分类的白名单内 | 保留但标记，提示该结论的可信度 |
+| `subtype` 不在该分类的白名单内 | **保留**：候选名写入 `suggested_subtype`，标记 `subtype_valid=False` 并落库为规范外候选 |
 
 其中「本轮到底调用了哪些工具」由 `_tools_called_since_entry` 统计——
 从消息尾部往前扫，遇到入口节点写入的交接消息就停：
@@ -744,8 +749,33 @@ def _tools_called_since_entry(messages: Sequence[BaseMessage]) -> Set[str]:
     return names
 ```
 
-> 效果：`「第 0 条证据不足：subtype 'possibly-used-before-assignment' 不在 Potential Bug 的允许集合内」`
+> 效果：`「第 0 条分类待确认：分类 'possibly-used-before-assignment' 未落入 Potential Bug 的允许集合（候选：possibly-used-before-assignment），已作为规范外问题保留」`
 > 这类校验说明会写进事件流，最终报告里也会保留，评审者一眼能看出哪些结论是硬的、哪些是软的。
+> 注意 `verified` 只反映**证据是否成立**：规范外结论只要有证据就仍是 `verified=True`，
+> 分类是否合规单独由 `subtype_valid` 表达，不会被误标成「证据不足」。
+
+### 规范外问题：候选子类型与动态白名单
+
+白名单保证了输出空间可评测，但真实代码里的问题类型不总是落在预设分类中。
+如果「不在白名单就不报」，规范外的真实问题会被系统性漏掉。为此增加一条候选通道：
+
+- `Issue.suggested_subtype` 承载建议的新分类名；`Issue.is_subtype_valid()` 同时检查
+  `subtype` 与 `suggested_subtype` 是否落在**当前允许集合**内。
+- `allowed_subtypes(category)` = 静态 `SUBTYPE_WHITELIST` + 已人工晋升项（`kind="subtype_whitelist"`），
+  提示词、校验、报告渲染都读这一个入口。
+- 汇总节点把规范外结论写成 `kind="subtype_candidate"` 记忆，并在统计里给出 `out_of_spec`。
+- **候选免于记忆压制**：新类别还没有历史反馈样本，旧误报记录不能代表它。
+
+人工确认候选确实是真实问题后：
+
+```bash
+python cli.py candidates list
+python cli.py candidates promote "Potential Bug" "Missing Timeout Handling"
+```
+
+晋升写入 `kind="subtype_whitelist"` 记忆并调用 `refresh_allowed_subtypes()` 刷新缓存；
+同一进程内后续校验即可按规范内结论对待，下次审查提示词里也会出现该子类型。
+
 
 修复助手用的是另一个收集节点 `collect_fix_assistant`，它做的是**harness 侧强制校验**：
 修复代码必须能通过 `ast.parse`，且公开接口不变——
@@ -1068,27 +1098,48 @@ def reject_tool_calls(state: ReviewState) -> Dict[str, Any]:
 ## 6.6 汇总节点
 
 主助手输出最终总结文本后，路由把它送到 `finalize_report`：
-去重、可选的长期记忆压制（复用长期记忆中的误报形态）、产出结构化报告。
+去重、可选的长期记忆压制（复用长期记忆中的误报形态）、记录规范外候选、产出结构化报告。
 
 ```python
         report = ReviewReport(review_summary=_last_text(state), issues=issues).dedupe()
 
         suppressed: List[Dict[str, Any]] = []
+        recorded_candidates = 0
         configurable = (config or {}).get("configurable", {}) or {}
         if configurable.get("use_memory", True) and report.issues:
             try:
                 from agent.memory import MemoryStore
 
                 store = MemoryStore()
+                project = str(configurable.get("project") or "default")
+                in_spec = [issue for issue in report.issues if issue.is_subtype_valid()]
                 kept, suppressed = store.apply_suppression(
-                    str(configurable.get("project") or "default"),
-                    report.issues,
+                    project,
+                    in_spec,
                     (state.get("target") or {}).get("code") or "",
                 )
-                report = ReviewReport(review_summary=report.review_summary, issues=kept)
+                # 规范外候选免于记忆压制：它们尚未进入白名单，历史误报样本不能代表这一类问题
+                kept_identities = {issue.identity() for issue in kept}
+                report = ReviewReport(
+                    review_summary=report.review_summary,
+                    issues=[
+                        issue
+                        for issue in report.issues
+                        if not issue.is_subtype_valid()
+                        or issue.identity() in kept_identities
+                    ],
+                )
+                for issue in report.issues:
+                    if issue.is_subtype_valid():
+                        continue
+                    if store.record_subtype_candidate(project, issue):
+                        recorded_candidates += 1
             except Exception as exc:
                 _log(f"[汇总] 记忆压制跳过：{exc}")
 ```
+
+报告里的 `stats` 因此多了两个字段：`out_of_spec`（规范外候选条数）与
+`new_subtype_candidates`（本轮新落库的候选数），便于观察白名单的覆盖缺口。
 
 ## 6.7 保存对话并设置中断
 
@@ -1309,3 +1360,7 @@ python test/test_review_assistant.py
 4. **沙箱执行必须人工确认**：修复助手要跑 `execute_python_code` / `run_tests` 时会暂停等待；
    `collect_fix_assistant` 只做无副作用的语法与接口校验，不会绕过这道闸门。
 5. **checkpointer 是内存实现**：`InMemorySaver` 适合单进程交互；要跨进程恢复需换成持久化 checkpointer。
+6. **动态白名单是「人工闭环」，不是自动学习**：规范外结论只落成 `subtype_candidate`，必须由人执行
+   `candidates promote` 才会进入允许集合；晋升项是全项目共享的，且只在调用
+   `refresh_allowed_subtypes()`（或新进程启动）后生效。这样能避免把模型幻觉自动固化成规范，
+   代价是白名单扩展需要一次人工确认。

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
-from agent.schema import SUBTYPE_WHITELIST, Category
+from agent.schema import Category, allowed_subtypes
 from review_assistant.dimensions import (
     ASSISTANT_CATEGORY,
     ASSISTANT_LABEL,
@@ -115,8 +115,8 @@ _FIX_PROMPT = """
 
 
 def category_subtypes(category: Category) -> str:
-    """把某维度的二级分类白名单渲染成提示词片段。"""
-    return " / ".join(SUBTYPE_WHITELIST.get(category, ()))
+    """把某维度的二级分类白名单（静态 + 已晋升候选）渲染成提示词片段。"""
+    return " / ".join(allowed_subtypes(category))
 
 
 def findings_schema_hint(category: Category) -> str:
@@ -131,7 +131,8 @@ def findings_schema_hint(category: Category) -> str:
     {{
       "category": "{category.value}",
       "severity": "High | Medium-High | Medium | Low",
-      "subtype": "必须来自下方允许集合",
+      "subtype": "优先来自下方允许集合",
+      "suggested_subtype": "规范外问题的建议分类名；属于允许集合时留空",
       "line_start": 12,
       "line_end": 12,
       "violated_rule": "违反的规则名",
@@ -152,6 +153,9 @@ def findings_schema_hint(category: Category) -> str:
 硬性约束：
 - 每条 issue 必须带 evidence；**没有任何证据的 issue 会在收集阶段被自动丢弃**。
 - line_start / line_end 必须真实落在下方带行号的源码里。
+- 问题真实存在但不在允许集合内时**照常上报**：subtype 填最接近的规范分类名，
+  suggested_subtype 填你建议的新分类名。不得因为「不在白名单」而不报，
+  收集阶段会把它作为规范外候选保留到最终报告。
 - 没问题时返回空数组，不要为了凑数编造结论。
 """
 

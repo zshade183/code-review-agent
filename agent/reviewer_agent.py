@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from agent.llm import LLMClient
 from agent.memory import MemoryStore
 from agent.runtime import AgentConfig, AgentRuntime, RunOutcome, extract_json_block
-from agent.schema import Issue, ReviewReport, SUBTYPE_WHITELIST
+from agent.schema import Category, Issue, ReviewReport, allowed_subtypes
 from agent.tools import build_reviewer_registry
 from agent.tools.base import ToolRegistry
 from agent.trace import TraceRecorder
@@ -58,7 +58,9 @@ REVIEWER_SYSTEM_PROMPT = f"""
 - **没有任何证据的 issue 会在校验阶段被自动丢弃**，不要浪费时间编造。
 - 禁止报告「未做参数 None 校验」这类无外部输入证据的假设性问题。
 - `line_start` / `line_end` 必须真实存在于输入代码中（行号见代码左侧）。
-- `subtype` 必须来自下方允许集合，不要自创。
+- `subtype` 优先来自下方允许集合。问题真实存在但不在集合内时**照常上报**：
+  把最接近的规范项填到 `subtype`，把建议的新分类名填到 `suggested_subtype`，
+  它会作为规范外候选保留在最终报告里，不会因为「不在白名单」被丢弃。
 
 {REVIEW_RULES}
 """
@@ -72,7 +74,8 @@ OUTPUT_SCHEMA_HINT = """
     {
       "category": "Security Vulnerability | Potential Bug | Code Smell | Performance Issue",
       "severity": "High | Medium-High | Medium | Low",
-      "subtype": "必须来自允许集合",
+      "subtype": "优先来自允许集合",
+      "suggested_subtype": "规范外问题的建议分类名；属于允许集合时留空",
       "line_start": 12,
       "line_end": 12,
       "violated_rule": "违反的规则名",
@@ -89,13 +92,16 @@ OUTPUT_SCHEMA_HINT = """
 
 允许的二级分类（subtype）：
 {_SUBTYPE_TEXT}
-""".replace(
-    "{_SUBTYPE_TEXT}",
-    "\n".join(
-        f"- {category.value}: " + " / ".join(subtypes)
-        for category, subtypes in SUBTYPE_WHITELIST.items()
-    ),
-)
+"""
+
+
+def output_schema_hint() -> str:
+    """渲染输出约定；二级分类按「静态白名单 + 已晋升候选」动态生成。"""
+    subtype_text = "\n".join(
+        f"- {category.value}: " + " / ".join(allowed_subtypes(category))
+        for category in Category
+    )
+    return OUTPUT_SCHEMA_HINT.replace("{_SUBTYPE_TEXT}", subtype_text)
 
 
 class EvidencePolicy:
@@ -217,12 +223,20 @@ class _ReportFinalizer:
                     notes.append("证据既无工具来源也无代码片段")
 
             if not issue.is_subtype_valid():
-                notes.append(f"subtype '{issue.subtype}' 不在允许集合内")
+                # 规范外问题保留并记录建议分类名，供后续人工晋升白名单
+                if not issue.suggested_subtype and issue.subtype not in ("", "Unspecified"):
+                    issue.suggested_subtype = issue.subtype
+                notes.append(
+                    f"分类 '{issue.subtype}' 未落入允许集合"
+                    f"（候选：{issue.suggested_subtype or issue.subtype}），已作为规范外问题保留"
+                )
 
-            issue.verified = verified and not notes
+            # verified 只反映证据是否成立；分类待确认由 is_subtype_valid() 单独表达
+            issue.verified = verified
             issue.verify_note = "；".join(notes)
-            if not issue.verified:
+            if notes:
                 issue.confidence = min(issue.confidence, self.policy.min_confidence_without_tool)
+            if not issue.verified:
                 self.flagged_issues.append(
                     {"reason": issue.verify_note, "subtype": issue.subtype, "line": issue.line_start}
                 )
@@ -313,7 +327,7 @@ class ReviewerAgent:
 
         outcome = runtime.run(
             self.build_user_prompt(code, file_path, extra_context),
-            system_prompt=REVIEWER_SYSTEM_PROMPT + "\n" + OUTPUT_SCHEMA_HINT,
+            system_prompt=REVIEWER_SYSTEM_PROMPT + "\n" + output_schema_hint(),
             finalizer=finalizer,
             task="review",
         )
@@ -336,15 +350,27 @@ class ReviewerAgent:
 
         # 长期记忆：压制与历史误报高度一致的结论
         if self.memory is not None and report.issues:
-            kept, suppressed = self.memory.apply_suppression(self.project, report.issues, code)
+            in_spec = [issue for issue in report.issues if issue.is_subtype_valid()]
+            kept, suppressed = self.memory.apply_suppression(self.project, in_spec, code)
+            # 规范外候选免压制：尚未进入白名单，历史误报样本不能代表这一类问题
+            kept_identities = {issue.identity() for issue in kept}
+            report = ReviewReport(
+                review_summary=(
+                    f"{report.review_summary}（记忆库压制 {len(suppressed)} 条历史误报形态）"
+                    if suppressed
+                    else report.review_summary
+                ),
+                issues=[
+                    issue
+                    for issue in report.issues
+                    if not issue.is_subtype_valid() or issue.identity() in kept_identities
+                ],
+            )
             if suppressed:
-                report = ReviewReport(
-                    review_summary=(
-                        f"{report.review_summary}（记忆库压制 {len(suppressed)} 条历史误报形态）"
-                    ),
-                    issues=kept,
-                )
                 outcome.run.output = dict(outcome.run.output or {})
                 outcome.run.output["suppressed_by_memory"] = suppressed
+            for issue in report.issues:
+                if not issue.is_subtype_valid():
+                    self.memory.record_subtype_candidate(self.project, issue)
 
         return report, outcome
