@@ -16,6 +16,7 @@ Pydantic 校验才能进入下游；JSON 主体统一由 ``agent/runtime.py`` �
 
 from __future__ import annotations
 
+import hashlib
 import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -37,6 +38,59 @@ class Severity(str, Enum):
     MEDIUM_HIGH = "Medium-High"
     MEDIUM = "Medium"
     LOW = "Low"
+
+
+class AdjudicationStatus(str, Enum):
+    """候选问题的最终裁决状态（由确定性规则产出，不经过 LLM 决策）。"""
+
+    #: 交叉验证通过，可直接展示
+    CONFIRMED = "confirmed"
+    #: 证据不足或角色间存在分歧，保留但提示人工复核
+    NEEDS_REVIEW = "needs_review"
+    #: 与历史误报形态高度一致，降权并单独分组（不直接删除）
+    MEMORY_SUSPECTED = "memory_suspected"
+    #: 多方一致认为不成立，移出最终报告
+    REJECTED = "rejected"
+
+
+class ReviewStrategy(str, Enum):
+    """审查策略：多 Agent 是默认能力，但不是每次请求都无条件调用全部角色。"""
+
+    #: 单 Reviewer + 基础验证（编辑器实时检查、低延迟场景）
+    FAST = "fast"
+    #: 依据公共证据与代码特征动态选择领域 Reviewer（默认）
+    AUTO = "auto"
+    #: 四领域 Reviewer + 选择性 Critic + 独立 Verifier（PR / CI / 重要代码）
+    FULL = "full"
+
+
+def normalize_strategy(value: Any, default: str = "auto") -> "ReviewStrategy":
+    """把外部传入的策略字符串归一；兼容历史 ``mode=single/multi`` 写法。
+
+    无法识别时回退到默认策略，而不是抛异常——入口层（CLI/API）不应因为
+    一个可选字段拼错就把整次审查打回。
+    """
+    if isinstance(value, ReviewStrategy):
+        return value
+    text = str(value or "").strip().lower()
+    aliases = {
+        "single": ReviewStrategy.FAST,
+        "single_agent": ReviewStrategy.FAST,
+        "multi": ReviewStrategy.FULL,
+        "multi_agent": ReviewStrategy.FULL,
+        "all": ReviewStrategy.FULL,
+    }
+    if text in aliases:
+        return aliases[text]
+    for strategy in ReviewStrategy:
+        if text == strategy.value:
+            return strategy
+    fallback = str(default or "auto").strip().lower()
+    for strategy in ReviewStrategy:
+        if fallback == strategy.value:
+            return strategy
+    return ReviewStrategy.AUTO
+
 
 
 #: 严重性 -> 中文风险等级（兼容 VSCode 插件与既有前端）
@@ -230,6 +284,13 @@ class Issue(BaseModel):
     verify_note: str = ""
     #: 多智能体场景下各角色结论冲突（例如 Critic 判误报但独立引擎佐证）
     disagreement: bool = False
+    #: 稳定的候选标识：合并、裁决与前端回传反馈都以它为锚点
+    candidate_id: str = ""
+    #: 产出该候选的角色列表（确定性合并后可能来自多个领域 Reviewer）
+    sources: List[str] = Field(default_factory=list)
+    #: 最终裁决状态，None 表示尚未进入裁决阶段
+    adjudication: Optional[AdjudicationStatus] = None
+    adjudication_reason: str = ""
 
     # ---------- 归一化 ----------
 
@@ -312,6 +373,21 @@ class Issue(BaseModel):
         """去重用的身份标识。"""
         return (self.category.value, self.subtype, self.line_start)
 
+    def ensure_candidate_id(self, suffix: str = "") -> str:
+        """返回稳定的候选标识（同一问题在不同角色/合并后保持一致）。
+
+        标识只由「分类 + 二级分类 + 起始行」决定（可选附加后缀），**不包含产出角色**：
+        同一问题被不同领域 Reviewer 重复报告时必须落到同一个 ``candidate_id``，
+        否则确定性合并就无法去重，前端反馈也会指向不同的候选。
+        """
+        if not self.candidate_id:
+            parts = [self.category.value, self.subtype, str(self.line_start)]
+            if suffix:
+                parts.append(suffix)
+            raw = "|".join(parts)
+            self.candidate_id = "cand-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        return self.candidate_id
+
     def to_legacy(self) -> Dict[str, Any]:
         """转换为既有 REST API / 插件期望的扁平字典。"""
         return {
@@ -330,8 +406,43 @@ class Issue(BaseModel):
             "produced_by": self.produced_by,
             "verified": self.verified,
             "verify_note": self.verify_note,
+            "disagreement": self.disagreement,
+            "candidate_id": self.ensure_candidate_id(),
+            "sources": list(self.sources),
+            "adjudication": self.adjudication.value if self.adjudication else None,
+            "adjudication_reason": self.adjudication_reason,
             "evidence": [e.model_dump() for e in self.evidence],
         }
+
+
+class FindingCandidate(BaseModel):
+    """领域 Reviewer 的产出契约。
+
+    领域 Reviewer 不直接产出最终报告，而是输出「候选问题 + 来源角色 + 证据引用」，
+    交给确定性的 Candidate Merger 统一规范化、去重与冲突检测。这样同一份输入无论
+    哪个角色先返回、并发顺序如何变化，合并结果都一致。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    #: 产出角色的稳定标识：security / bug / quality / performance / single_agent
+    reviewer: str
+    issue: Issue
+    #: 该候选引用的共享证据键（如 "syntax"、"rules:12"），便于回溯「凭什么这么判断」
+    evidence_refs: List[str] = Field(default_factory=list)
+    #: Reviewer 的自述理由（评审过程说明，不进入最终报告）
+    notes: str = ""
+    #: 该候选在 Reviewer 原始输出中的序号，用于对齐 Critic 裁定
+    raw_index: int = 0
+
+    def to_issue(self) -> Issue:
+        """转成带来源标注的 ``Issue``。"""
+        issue = self.issue.model_copy(deep=True)
+        issue.produced_by = self.reviewer
+        if self.reviewer not in issue.sources:
+            issue.sources = [self.reviewer, *issue.sources]
+        issue.ensure_candidate_id()
+        return issue
 
 
 class ReviewReport(BaseModel):
@@ -447,6 +558,67 @@ class OptimizationResult(BaseModel):
             "patch": self.patch,
             "verification": self.verification.to_dict(),
             "attempts": self.attempts,
+        }
+
+
+class DimensionCoverage(BaseModel):
+    """单个审查维度（或角色）的执行覆盖情况。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    dimension: str
+    status: Literal["completed", "timeout", "error", "skipped"] = "skipped"
+    detail: str = ""
+    elapsed_ms: float = 0.0
+    issues: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "completed"
+
+
+class CoverageReport(BaseModel):
+    """一次审查的覆盖度报告：用于表达「部分成功」而不是整体失败。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    strategy: str = "auto"
+    dimensions: Dict[str, DimensionCoverage] = Field(default_factory=dict)
+
+    @property
+    def partial(self) -> bool:
+        """任一维度未完成即为部分成功。"""
+        return any(not item.ok for item in self.dimensions.values())
+
+    @property
+    def incomplete(self) -> List[str]:
+        return [name for name, item in self.dimensions.items() if not item.ok]
+
+    def mark(
+        self,
+        dimension: str,
+        status: str,
+        detail: str = "",
+        elapsed_ms: float = 0.0,
+        issues: int = 0,
+    ) -> "CoverageReport":
+        self.dimensions[dimension] = DimensionCoverage(
+            dimension=dimension,
+            status=status,  # type: ignore[arg-type]
+            detail=detail,
+            elapsed_ms=round(elapsed_ms, 2),
+            issues=issues,
+        )
+        return self
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "partial": self.partial,
+            "incomplete": self.incomplete,
+            "dimensions": {
+                name: item.model_dump() for name, item in self.dimensions.items()
+            },
         }
 
 

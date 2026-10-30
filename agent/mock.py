@@ -19,6 +19,21 @@ from agent.schema import TokenUsage
 _CODE_FENCE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.S)
 #: 提示词里的代码带有 "12| " 形式的行号前缀，喂给工具前必须去掉
 _LINE_PREFIX_RE = re.compile(r"^\s*\d+\|\s?", re.M)
+#: 领域 Reviewer 的 system prompt 里带有「审查维度」标记，mock 据此收敛输出类别
+_REVIEW_CATEGORY_RE = re.compile(r"【审查维度】\s*([^\n（(]+)")
+_SHARED_FINDING_RE = re.compile(
+    r"·\s*行\s*(\d+):\s*\[([^\]]+)\]\s*([^\n（]+)（([^)）]+)[)）]"
+)
+
+
+def _prompt_review_category(messages: Sequence[Message]) -> str:
+    for msg in messages:
+        if msg.get("role") != "system":
+            continue
+        match = _REVIEW_CATEGORY_RE.search(str(msg.get("content") or ""))
+        if match:
+            return match.group(1).strip()
+    return ""
 
 
 def _strip_line_numbers(code: str) -> str:
@@ -66,6 +81,23 @@ def _count_tool_messages(messages: Sequence[Message]) -> int:
     return sum(1 for m in messages if m.get("role") == "tool")
 
 
+def _shared_evidence_payload(prompt_text: str) -> Optional[Dict[str, Any]]:
+    """从领域 Reviewer 提示词中还原 Collector 已注入的候选，供离线 mock 使用。"""
+    issues: List[Dict[str, Any]] = []
+    for match in _SHARED_FINDING_RE.finditer(prompt_text):
+        issues.append(
+            {
+                "line_start": int(match.group(1)),
+                "category": match.group(2).strip(),
+                "subtype": match.group(3).strip(),
+                "severity": match.group(4).strip(),
+                "risk_description": "来自共享 Evidence Collector 的静态分析候选",
+                "fix_suggestion": "结合代码语义修复该问题",
+            }
+        )
+    return {"issues": issues} if issues else None
+
+
 def _usage(prompt: str, completion: str) -> TokenUsage:
     prompt_tokens = max(1, len(prompt) // 4)
     completion_tokens = max(1, len(completion) // 4)
@@ -76,8 +108,12 @@ def _usage(prompt: str, completion: str) -> TokenUsage:
     )
 
 
-def _build_final_report(tool_payload: Any, code: str) -> str:
-    """根据工具观察结果产出最终报告（模拟模型基于证据作答）。"""
+def _build_final_report(tool_payload: Any, code: str, category_filter: str = "") -> str:
+    """根据工具观察结果产出最终报告（模拟模型基于证据作答）。
+
+    ``category_filter`` 非空时只保留该一级分类——用于模拟领域 Reviewer 的
+    「只报自己维度」行为，让离线测试能覆盖分流逻辑。
+    """
     issues: List[Dict[str, Any]] = []
     if isinstance(tool_payload, list):
         candidates = tool_payload
@@ -89,6 +125,8 @@ def _build_final_report(tool_payload: Any, code: str) -> str:
     total_lines = max(1, len(code.split("\n")))
     for item in candidates:
         if not isinstance(item, dict):
+            continue
+        if category_filter and str(item.get("category") or "") != category_filter:
             continue
         line = item.get("line_start") or item.get("line_number") or 1
         try:
@@ -136,6 +174,7 @@ def mock_chat(
     }
     observed = _count_tool_messages(messages)
     code = _extract_code(messages)
+    category_filter = _prompt_review_category(messages)
 
     # Critic 角色：直接产出裁定（无需调工具）
     if "待评审的问题清单" in prompt_text:
@@ -170,7 +209,10 @@ def mock_chat(
         )
 
     # 第 3 步：基于证据产出结构化报告
-    final = _build_final_report(_best_tool_payload(messages), code)
+    tool_payload = _best_tool_payload(messages)
+    if tool_payload is None:
+        tool_payload = _shared_evidence_payload(prompt_text)
+    final = _build_final_report(tool_payload, code, category_filter)
     return LLMResponse(
         content=final,
         usage=_usage(prompt_text, final),

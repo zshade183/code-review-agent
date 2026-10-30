@@ -1,9 +1,0 @@
-{
-  "total": 2,
-  "train": 1,
-  "val": 0,
-  "test": 1,
-  "by_type": {
-    "bug": 2
-  }
-}

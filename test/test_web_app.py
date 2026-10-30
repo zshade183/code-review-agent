@@ -95,7 +95,9 @@ def main() -> int:
 
         check("点击「开始审查」后无异常", not app.exception, str(app.exception[0].value if app.exception else ""))
 
-        result = app.session_state.get("review_result") or {}
+        # AppTest 暴露的是 SafeSessionState：支持下标访问，但部分 Streamlit
+        # 版本没有实现普通 dict 的 ``get`` 方法。
+        result = app.session_state["review_result"] or {}
         report = result.get("report") or {}
         issues = report.get("issues") or []
         check("拿到结构化审查报告", bool(report), f"issues={len(issues)}")

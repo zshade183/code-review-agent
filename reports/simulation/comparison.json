@@ -1,0 +1,10 @@
+{
+  "simulation": true,
+  "notice": "模拟数据，仅用于报告排版与图表展示；未经真实运行，不得作为实测结果或研究结论。",
+  "dataset_assumptions": {"samples": 50, "ground_truth_issues": 48, "clean_samples": 14},
+  "results": [
+    {"arm": "baseline", "tp": 29, "fp": 17, "fn": 19, "clean_false_alarm_samples": 6, "exact_success_samples": 18, "avg_duration_seconds": 1.5, "p95_duration_seconds": 2.3, "avg_tokens": 0, "avg_model_calls": 0, "failed_samples": 0},
+    {"arm": "single_call", "tp": 36, "fp": 12, "fn": 12, "clean_false_alarm_samples": 4, "exact_success_samples": 27, "avg_duration_seconds": 8.2, "p95_duration_seconds": 14.6, "avg_tokens": 1400, "avg_model_calls": 1, "failed_samples": 0},
+    {"arm": "full_agent", "tp": 41, "fp": 7, "fn": 7, "clean_false_alarm_samples": 2, "exact_success_samples": 35, "avg_duration_seconds": 24.8, "p95_duration_seconds": 43.5, "avg_tokens": 5200, "avg_model_calls": 3.4, "failed_samples": 0}
+  ]
+}

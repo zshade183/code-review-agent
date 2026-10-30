@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from agent.tools import build_optimizer_registry, build_registry, build_reviewer_registry
 from agent.tools.base import ToolRegistry
+from agent.tools.pipeline_tools import ReviewCodeTool
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "code-review-agent"
@@ -65,10 +66,15 @@ def log(message: str) -> None:
 
 def build_tools(profile: str, codebase_root: Optional[str]) -> ToolRegistry:
     if profile == "review":
-        return build_reviewer_registry(codebase_root)
-    if profile == "optimize":
-        return build_optimizer_registry(codebase_root)
-    return build_registry(codebase_root)
+        registry = build_reviewer_registry(codebase_root)
+    elif profile == "optimize":
+        registry = build_optimizer_registry(codebase_root)
+    else:
+        registry = build_registry(codebase_root)
+    # 多 Agent 主线：把「完整审查」本身暴露成一个工具，供任意 MCP 客户端调用。
+    if profile in ("review", "all"):
+        registry.register(ReviewCodeTool())
+    return registry
 
 
 class McpServer:

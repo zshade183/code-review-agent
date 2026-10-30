@@ -13,13 +13,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from agent.memory import HashingEmbedder, MemoryStore
+from agent.settings import MEMORY_PATH
 
 _SECTION_RE = re.compile(r"(?=【规则\s*\d+)")
 
@@ -83,16 +86,26 @@ def build_corpus(project: str = "default") -> List[Dict[str, str]]:
 
     try:
         store = MemoryStore()
+        allowed_projects = {"default"} if project == "default" else {"default", project}
         for record in store.records:
             if record.kind != "convention":
                 continue
-            if record.project not in (project, "default"):
+            if record.project not in allowed_projects:
                 continue
             docs.append(
                 {
                     "source": "memory",
                     "title": f"项目约定（{record.project}）",
                     "page_content": record.text,
+                }
+            )
+        for record in store.entities(project):
+            facts = json.dumps(record.payload.get("facts", {}), ensure_ascii=False, sort_keys=True)
+            docs.append(
+                {
+                    "source": "entity_memory",
+                    "title": f"实体事实（{record.payload.get('entity_type', 'entity')}）",
+                    "page_content": f"{record.payload.get('name', record.text)}: {facts}",
                 }
             )
     except Exception:  # noqa: BLE001 - 记忆库不可用不应阻断检索
@@ -145,12 +158,15 @@ class RuleRetriever:
         ]
 
 
-_RETRIEVER: Optional[RuleRetriever] = None
+_RETRIEVERS: Dict[str, Tuple[int, RuleRetriever]] = {}
 
 
 def get_retriever(project: str = "default") -> RuleRetriever:
-    """惰性构建并缓存检索器（首次调用有一次向量化开销）。"""
-    global _RETRIEVER
-    if _RETRIEVER is None:
-        _RETRIEVER = RuleRetriever.from_docs(build_corpus(project))
-    return _RETRIEVER
+    """按项目缓存检索器；记忆文件变化后自动重建。"""
+    path = Path(MEMORY_PATH)
+    revision = path.stat().st_mtime_ns if path.exists() else 0
+    cached = _RETRIEVERS.get(project)
+    if cached is None or cached[0] != revision:
+        cached = (revision, RuleRetriever.from_docs(build_corpus(project)))
+        _RETRIEVERS[project] = cached
+    return cached[1]

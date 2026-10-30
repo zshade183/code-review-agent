@@ -1,10 +1,11 @@
-"""Streamlit 前端：对接 FastAPI 的 Agent 接口。
+"""Streamlit 前端：对接 FastAPI 的多 Agent 审查接口。
 
-- 走 ``/agent/review`` 拿**结构化报告**（问题表 + 证据 + 运行轨迹）；
-- 可选走 ``/agent/review/stream``（SSE）实时显示「Agent 正在调用哪个工具」；
-- 支持单 Agent / 多智能体两种模式切换；
-- 每条结论都能一键「标记为误报」，写回后端长期记忆，下次审查自动压制同类误报；
-- 修复走 ``/agent/optimize``，把三级验证结果单独展示出来。
+- 走 ``/agent/review`` 拿**结构化报告**（问题表 + 证据 + 裁决状态 + 各角色轨迹）；
+- 可选走 ``/agent/review/stream``（SSE）实时显示「哪个角色正在调用哪个工具」；
+- 支持 fast / auto / full 三种审查策略与覆盖度 / 部分成功展示；
+- 每条结论都能一键「标记为误报」，写回后端长期记忆，下次审查在裁决后降权；
+- 修复走 ``/agent/fix``：先生成计划等待人工确认，确认后才启动 Fix Agent，
+  并在受限沙箱里做「语法 → 接口兼容 → 行为测试」三级验证。
 
 启动::
 
@@ -140,11 +141,12 @@ st.markdown(
     """
 <div class="app-hero">
   <h1>🧠 智能<span class="accent">代码审查</span> Agent</h1>
-  <p>主助手调度多维度子助手取证 · 结论必须挂证据 · 修复跑真实沙箱验证</p>
-  <span class="pill">证据闭环</span>
-  <span class="pill">单 Agent / 多智能体</span>
-  <span class="pill">SSE 实时轨迹</span>
-  <span class="pill">人工确认敏感操作</span>
+  <p>确定性编排的多 Agent 协作：共享证据 · 领域专家并行 · 独立验证 · 规则裁决 · 人工确认后修复</p>
+  <span class="pill">Evidence Collector</span>
+  <span class="pill">四领域 Reviewer</span>
+  <span class="pill">Critic / Verifier 并行</span>
+  <span class="pill">确定性裁决</span>
+  <span class="pill">Review / Fix 分离</span>
 </div>
 """,
     unsafe_allow_html=True,
@@ -227,15 +229,23 @@ with st.sidebar:
         st.success("后端连接正常（真实模型已启用）")
 
     st.markdown("---")
-    mode_label = st.radio(
-        "审查模式",
-        ["单 Agent（快）", "多智能体（Reviewer/Critic/Verifier）"],
-        help="多智能体会多跑一轮对抗式评审，成本与耗时更高，但误报更少。",
+    strategy_label = st.radio(
+        "审查策略",
+        ["auto（按证据选择领域，推荐）", "fast（单 Agent，最快）", "full（四领域 + 复核）"],
+        help="多 Agent 是默认能力，但不必每次请求都无条件调用全部角色："
+             "fast 适合编辑器实时检查，auto 是默认策略，full 用于 PR / CI / 重要代码。",
     )
-    review_mode = "multi" if mode_label.startswith("多") else "single"
-    use_memory = st.toggle("启用长期记忆压制", value=True, help="把历史被驳回的误报形态自动压制掉")
+    strategy = {
+        "auto（按证据选择领域，推荐）": "auto",
+        "fast（单 Agent，最快）": "fast",
+        "full（四领域 + 复核）": "full",
+    }[strategy_label]
+    use_memory = st.toggle(
+        "启用长期记忆信号", value=True,
+        help="历史误报只在裁决后降低置信度并单独分组，不会在独立验证前删除候选",
+    )
     project = st.text_input("项目标识", value="default", help="用于隔离不同项目的记忆")
-    stream_steps = st.toggle("实时显示 Agent 步骤", value=True, help="通过 SSE 边跑边看工具调用")
+    stream_steps = st.toggle("实时显示 Agent 步骤", value=True, help="通过 SSE 边跑边看各角色工具调用")
 
     with st.expander("使用说明"):
         st.markdown(
@@ -315,6 +325,8 @@ def render_steps(steps: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
     for step in steps[-14:]:
         prefix = f"`#{step.get('index')}` **{step.get('kind') or '?'}**"
+        if step.get("role"):
+            prefix = f"`[{step['role']}]` " + prefix
         if step.get("tool"):
             prefix += f" `{step['tool']}`"
         lines.append(f"- {prefix} {str(step.get('brief') or '')[:160]}")
@@ -393,21 +405,28 @@ def render_report(report: Dict[str, Any], host: str, project: str, code: str) ->
 
     for idx, issue in enumerate(shown, start=1):
         _, dot = SEVERITY_STYLE.get(str(issue.get("severity")), ("sev-low", "⚪"))
+        status = issue.get("adjudication") or "unadjudicated"
         title = (
             f"{dot} {issue.get('severity')} · 行 {issue.get('line_number')} · "
-            f"{issue.get('subtype') or issue.get('category')}"
+            f"{issue.get('subtype') or issue.get('category')} · {status}"
         )
         with st.expander(title, expanded=False):
             st.markdown(
                 f"{severity_badge(str(issue.get('severity')))}"
                 f"<span class='issue-meta'>　{issue.get('category')} ｜ 规则："
-                f"{issue.get('violated_rule') or '—'} ｜ 置信度：{round(float(issue.get('confidence') or 0), 2)}</span>",
+                f"{issue.get('violated_rule') or '—'} ｜ 置信度：{round(float(issue.get('confidence') or 0), 2)}"
+                f" ｜ 裁决：{status} ｜ 来源：{'/'.join(issue.get('sources') or []) or issue.get('produced_by') or '—'}"
+                f"</span>",
                 unsafe_allow_html=True,
             )
             st.markdown(f"<div class='issue-desc'>{issue.get('risk_description') or ''}</div>", unsafe_allow_html=True)
             st.markdown(f"**修复建议**：{issue.get('fix_suggestion') or '—'}")
             if issue.get("verify_note"):
                 st.caption(f"校验说明：{issue['verify_note']}")
+            if issue.get("adjudication_reason"):
+                st.caption(f"裁决说明：{issue['adjudication_reason']}")
+            if issue.get("candidate_id"):
+                st.caption(f"候选 ID：`{issue['candidate_id']}`（修复时按此选择）")
             for evidence in issue.get("evidence") or []:
                 st.markdown(
                     f"- 证据 `{evidence.get('tool') or evidence.get('kind')}`"
@@ -447,7 +466,10 @@ tab_review, tab_fix = st.tabs(["🔍 代码审查", "🛠️ 代码修复"])
 with tab_review:
     left, right = st.columns([1, 4])
     trigger = left.button("开始审查", type="primary", width="stretch")
-    right.caption("主助手会自动编排：安全 → 缺陷 → 坏味 → 性能，逐维度取证后汇总。")
+    right.caption(
+        "确定性编排：Evidence Collector → 领域 Reviewer 并行 → Candidate Merger → "
+        "Critic / Verifier 并行 → 规则裁决 → 记忆调整。"
+    )
 
     if trigger:
         if not code.strip():
@@ -455,11 +477,11 @@ with tab_review:
         else:
             payload = {
                 "code": code,
-                "mode": review_mode,
+                "strategy": strategy,
                 "use_memory": use_memory,
                 "project": project,
             }
-            logger.info("用户触发审查：mode=%s stream=%s", review_mode, stream_steps)
+            logger.info("用户触发审查：strategy=%s stream=%s", strategy, stream_steps)
             result: Optional[Dict[str, Any]] = None
             if stream_steps:
                 with st.status("Agent 正在工作…", expanded=True) as status_box:
@@ -492,11 +514,36 @@ with tab_review:
     review_result = st.session_state.get("review_result")
     if review_result:
         st.markdown("### 📝 审查结果")
-        if review_result.get("mode") == "multi":
-            stats = review_result.get("stats") or {}
-            st.caption(f"多智能体模式：{json.dumps(stats, ensure_ascii=False)}")
+        stats = review_result.get("stats") or {}
+        coverage = review_result.get("coverage") or {}
+        plan_info = review_result.get("plan") or {}
+        st.markdown(
+            f"**策略**：`{review_result.get('strategy')}` ｜ "
+            f"**领域**：{('、'.join(plan_info.get('reviewer_roles') or []) or '单 Agent')} ｜ "
+            f"**部分成功**：{coverage.get('partial')}"
+        )
+        if coverage.get("incomplete"):
+            st.warning(f"以下维度未完成（其余结果仍有效）：{coverage.get('incomplete')}")
+        adjudication = stats.get("adjudication") or {}
+        columns = st.columns(4)
+        for column, (label, key) in zip(
+            columns,
+            [("已确认", "confirmed"), ("待人工复核", "needs_review"),
+             ("记忆存疑", "memory_suspected"), ("已驳回", "rejected")],
+        ):
+            column.metric(label, adjudication.get(key, 0))
         render_report(review_result.get("report") or {}, api_host, project, code)
-        render_trace(review_result.get("trace") or {})
+        with st.expander("🔎 各角色轨迹"):
+            st.caption(
+                f"tokens={stats.get('tokens')}｜耗时={round((stats.get('elapsed_ms') or 0) / 1000, 2)}s｜"
+                f"critic={json.dumps(stats.get('critic') or {}, ensure_ascii=False)}"
+            )
+            for role, trace in (review_result.get("traces") or {}).items():
+                st.markdown(
+                    f"- `{role}` stop={trace.get('stop_reason')} steps={trace.get('steps')} "
+                    f"tokens={trace.get('usage', {}).get('total_tokens')} "
+                    f"tools={json.dumps(trace.get('tool_calls') or {}, ensure_ascii=False)}"
+                )
         st.download_button(
             "📥 下载审查报告(JSON)",
             data=json.dumps(review_result, ensure_ascii=False, indent=2),
@@ -506,32 +553,104 @@ with tab_review:
     else:
         st.markdown(
             '<div class="empty-card">粘贴或上传代码后点击「开始审查」，'
-            "结果会在这里按维度展示，并可展开查看证据。</div>",
+            "结果会在这里按维度展示，并可展开查看证据与裁决状态。</div>",
             unsafe_allow_html=True,
         )
 
 with tab_fix:
-    st.caption("先审查、再修复，并在受限沙箱里做「语法 → 接口兼容 → 行为测试」验证；不通过会回退原代码。")
+    st.caption(
+        "审查与修复是两条独立管线：先在「代码审查」得到候选，人工确认要修哪些，"
+        "再交给 Fix Agent；修复必须通过「语法 → 接口兼容 → 行为测试」三级验证，不通过会回退原代码。"
+    )
     test_code = st.text_area(
         "验收测试代码（可选，填了会真实跑一遍行为测试）",
         height=120,
         key="test_code",
-        placeholder="def test_fix():\n    assert calculate(1, 2) == 3",
+        placeholder="from module import calculate\n\ndef test_fix():\n    assert calculate(1, 2) == 3",
     )
-    if st.button("开始修复", type="primary"):
-        if not code.strip():
-            st.warning("请先输入或上传代码")
-        else:
-            with st.spinner("正在审查并生成修复…"):
-                payload = {"code": code, "test_code": test_code}
-                result, error = api_post(api_host, "/agent/optimize", payload)
-            if error:
-                st.error(f"修复失败：{error}")
-                logger.error("修复失败: %s", error)
-                result = None
-            st.session_state["optimize_result"] = result
+    review_result = st.session_state.get("review_result") or {}
+    review_issues = (review_result.get("report") or {}).get("issues") or []
 
-    fix_result = st.session_state.get("optimize_result")
+    if not review_issues:
+        st.info("请先在「代码审查」页完成一次审查，修复计划需要基于审查候选生成。")
+    else:
+        option_map = {}
+        for issue in review_issues:
+            candidate_id = issue.get("candidate_id") or ""
+            option_map[candidate_id] = (
+                f"{issue.get('risk_level')}｜{issue.get('category')} / {issue.get('subtype')}"
+                f"｜行 {issue.get('line_number')}｜{issue.get('adjudication') or 'unadjudicated'}"
+            )
+        default_ids = [
+            issue.get("candidate_id")
+            for issue in review_issues
+            if issue.get("candidate_id")
+            and (issue.get("adjudication") or "confirmed") in {"confirmed", "needs_review"}
+        ][:5]
+        selected_ids = st.multiselect(
+            "选择要修复的候选（默认选择已确认/待复核的前 5 条）",
+            options=list(option_map),
+            default=default_ids,
+            format_func=lambda candidate_id: option_map.get(candidate_id, candidate_id),
+        )
+        include_memory_suspected = st.toggle(
+            "也修复「记忆存疑」候选", value=False,
+            help="记忆存疑默认不自动修复；需要人工显式勾选",
+        )
+        if st.button("生成修复计划（人工确认）", type="primary"):
+            with st.spinner("生成修复计划…"):
+                plan_result, error = api_post(
+                    api_host,
+                    "/agent/fix",
+                    {
+                        "code": code,
+                        "issues": review_issues,
+                        "candidate_ids": selected_ids,
+                        "include_memory_suspected": include_memory_suspected,
+                        "strategy": review_result.get("strategy") or "auto",
+                        "confirm": False,
+                    },
+                )
+            if error:
+                st.error(f"生成修复计划失败：{error}")
+                logger.error("生成修复计划失败: %s", error)
+            st.session_state["fix_plan"] = plan_result
+
+        fix_plan = st.session_state.get("fix_plan")
+        if fix_plan:
+            plan = fix_plan.get("plan") or {}
+            st.markdown("### 🧾 待确认修复计划")
+            if plan.get("empty"):
+                st.warning("没有选中可修复的问题。")
+            else:
+                for issue in plan.get("selected") or []:
+                    st.markdown(
+                        f"- `{issue.get('candidate_id')}` [{issue.get('severity')}] "
+                        f"{issue.get('category')} / {issue.get('subtype')} @行 {issue.get('line_number')}"
+                    )
+                if plan.get("excluded"):
+                    st.caption(f"已跳过：{plan.get('excluded')}")
+                if st.button("确认并执行修复", type="primary"):
+                    with st.spinner("Fix Agent 正在修复并验证…"):
+                        fix_result, error = api_post(
+                            api_host,
+                            "/agent/fix",
+                            {
+                                "code": code,
+                                "issues": review_issues,
+                                "candidate_ids": plan.get("candidate_ids") or [],
+                                "include_memory_suspected": True,
+                                "strategy": review_result.get("strategy") or "auto",
+                                "test_code": test_code,
+                                "confirm": True,
+                            },
+                        )
+                    if error:
+                        st.error(f"修复失败：{error}")
+                        logger.error("修复失败: %s", error)
+                    st.session_state["fix_result"] = fix_result
+
+    fix_result = st.session_state.get("fix_result")
     if fix_result:
         result = fix_result.get("result") or {}
         st.markdown("### 🛠️ 修复结果")
@@ -554,13 +673,13 @@ with tab_fix:
         render_trace(fix_result.get("trace") or {})
     else:
         st.markdown(
-            '<div class="empty-card">修复会先生成方案，再依次做语法、接口兼容与沙箱验证。'
+            '<div class="empty-card">先审查、再选择候选、确认计划，最后才启动 Fix Agent。'
             "填写验收测试可以额外跑一遍行为测试。</div>",
             unsafe_allow_html=True,
         )
 
 st.markdown(
-    '<div class="app-footer">智能代码审查 Agent · 结论必须带证据 · 修复必须通过验证 · '
-    '接口文档 <code>/docs</code></div>',
+    '<div class="app-footer">多 Agent 代码审查 · 共享证据 / 领域协作 / 独立验证 / 规则裁决 · '
+    'Review 与 Fix 分离 · 接口文档 <code>/docs</code></div>',
     unsafe_allow_html=True,
 )

@@ -16,9 +16,7 @@ sys.path.insert(0, str(ROOT))
 from experiments.dataset_loader import load_dataset  # noqa: E402
 
 CASES = [
-    ("dataset/eval.json", 5),
-    ("dataset/test.json", 3),
-    ("data/eval_dataset_500.json", 3),
+    ("data/eval.json", 5),
 ]
 
 

@@ -72,6 +72,7 @@ function postJson(urlString, body) {
             });
         });
         req.on('error', (err) => reject(err));
+        req.setTimeout(360000, () => req.destroy(new Error('请求超时，请检查后台服务')));
         req.write(data);
         req.end();
     });
@@ -173,21 +174,23 @@ function normalizeReviewResult(input) {
 function activate(context) {
     const diagnosticCollection = vscode.languages.createDiagnosticCollection('ai-reviewer');
     context.subscriptions.push(diagnosticCollection);
-    let lastReviewResult = null;
-    const config = vscode.workspace.getConfiguration('aiReviewer');
-    const apiHost = config.get('apiHost') || 'http://127.0.0.1:8000';
+    const apiHost = () => (vscode.workspace.getConfiguration('aiReviewer').get('apiHost') || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+    // 编辑器场景默认 auto：既不是单 Agent，也不总是跑完整四领域。
+    const strategy = () => {
+        const value = (vscode.workspace.getConfiguration('aiReviewer').get('strategy') || 'auto').trim().toLowerCase();
+        return value === 'fast' || value === 'full' ? value : 'auto';
+    };
     const runReview = (editor, target) => __awaiter(this, void 0, void 0, function* () {
         yield vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: 'AI 正在深度审查代码...',
+            title: 'AI 正在多 Agent 审查代码...',
             cancellable: false,
         }, () => __awaiter(this, void 0, void 0, function* () {
             try {
-                const data = yield postJson(`${apiHost}/review`, { code: target.code });
+                const data = yield postJson(`${apiHost()}/review?strategy=${encodeURIComponent(strategy())}`, { code: target.code });
                 const result = normalizeReviewResult(data.result);
-                lastReviewResult = result;
                 applyDiagnostics(editor.document, result, diagnosticCollection, target.lineOffset, target.allowedStartLine, target.allowedEndLine, target.selectionRange);
-                showReviewResult(result, () => toJsonReport(lastReviewResult), (line) => revealLine(editor, line), (content) => __awaiter(this, void 0, void 0, function* () { return saveReportToWorkspace(content); }), target.lineOffset);
+                showReviewResult(result, () => toJsonReport(result), (line) => revealLine(editor, line), (content) => __awaiter(this, void 0, void 0, function* () { return saveReportToWorkspace(content); }), target.lineOffset);
             }
             catch (error) {
                 vscode.window.showErrorMessage(`审查失败: ${error.message}`);
@@ -195,6 +198,7 @@ function activate(context) {
         }));
     });
     const runOptimize = (editor, target) => __awaiter(this, void 0, void 0, function* () {
+        const sourceVersion = editor.document.version;
         yield vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'AI 正在尝试优化代码...',
@@ -202,8 +206,11 @@ function activate(context) {
         }, () => __awaiter(this, void 0, void 0, function* () {
             var _a;
             try {
-                const data = yield postJson(`${apiHost}/optimize`, { code: target.code });
+                const data = yield postJson(`${apiHost()}/optimize?strategy=${encodeURIComponent(strategy())}`, { code: target.code });
                 showOptimizeResult(target.code, (_a = data.result) !== null && _a !== void 0 ? _a : '', (optimized) => __awaiter(this, void 0, void 0, function* () {
+                    if (editor.document.isClosed || editor.document.version !== sourceVersion) {
+                        throw new Error('文件已修改或关闭，请重新生成优化方案');
+                    }
                     if (target.selectionRange) {
                         yield replaceRange(editor, target.selectionRange, optimized);
                     }
@@ -519,12 +526,12 @@ function showOptimizeResult(oldCode, newCode, onApply) {
             <div class="hint">提示: 您可以手动复制以上代码并替换原代码中的相应部分。</div>
             <script>
                 const vscode = acquireVsCodeApi();
-                const optimized = ${JSON.stringify(newCode)};
+                const optimized = ${JSON.stringify(newCode).replace(/</g, '\\u003c')};
                 document.getElementById('apply').addEventListener('click', () => {
                     vscode.postMessage({ command: 'apply', code: optimized });
                 });
                 document.getElementById('copy').addEventListener('click', async () => {
-                    try { await navigator.clipboard.writeText(optimized); } catch (e) {}
+                    vscode.postMessage({ command: 'copy' });
                 });
             </script>
         </body>
@@ -532,8 +539,16 @@ function showOptimizeResult(oldCode, newCode, onApply) {
     `;
     panel.webview.onDidReceiveMessage((message) => __awaiter(this, void 0, void 0, function* () {
         if (message && message.command === 'apply' && typeof message.code === 'string') {
-            yield onApply(message.code);
-            vscode.window.showInformationMessage('已应用优化代码到当前文件');
+            try {
+                yield onApply(newCode);
+                vscode.window.showInformationMessage('已应用优化代码到当前文件');
+            }
+            catch (error) {
+                vscode.window.showErrorMessage(`应用失败: ${error.message}`);
+            }
+        }
+        else if (message && message.command === 'copy') {
+            yield vscode.env.clipboard.writeText(newCode);
         }
     }));
 }

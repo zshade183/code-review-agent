@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Sequence
@@ -145,7 +146,16 @@ class LLMClient:
         self.max_retries = max_retries
         self.mock = settings.MOCK_MODE if mock is None else mock
         self._tools_supported: Optional[bool] = None
-        self._session = requests.Session()
+        # ReviewPipeline 会在线程池中并行调用多个领域 Reviewer。requests.Session
+        # 不保证跨线程安全，因此每个工作线程各自持有连接池；同一线程内仍能复用连接。
+        self._session_local = threading.local()
+
+    def _session(self) -> requests.Session:
+        session = getattr(self._session_local, "value", None)
+        if session is None:
+            session = requests.Session()
+            self._session_local.value = session
+        return session
 
     # ---------- 能力探测 ----------
 
@@ -286,7 +296,7 @@ class LLMClient:
         for attempt in range(self.max_retries):
             started = time.time()
             try:
-                response = self._session.post(
+                response = self._session().post(
                     self.api_url,
                     headers=self._headers(),
                     json=payload,
@@ -354,7 +364,7 @@ class LLMClient:
         payload = self._payload(messages, None, temperature, True)
 
         try:
-            with self._session.post(
+            with self._session().post(
                 self.api_url,
                 headers=self._headers(),
                 json=payload,

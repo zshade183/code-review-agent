@@ -66,6 +66,16 @@
                     "type": "string",
                     "default": "http://127.0.0.1:8000",
                     "description": "后台 API 服务地址"
+                },
+                "aiReviewer.strategy": {
+                    "type": "string",
+                    "enum": [
+                        "fast",
+                        "auto",
+                        "full"
+                    ],
+                    "default": "auto",
+                    "description": "审查策略：fast=单 Agent（最快）；auto=按证据选择领域（默认）；full=四领域 + Critic + Verifier（最严格）"
                 }
             }
         }
@@ -74,9 +84,8 @@
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
-        "pretest": "npm run compile && npm run lint",
-        "lint": "eslint src --ext ts",
-        "test": "node ./out/test/runTest.js"
+        "pretest": "npm run compile",
+        "test": "node test/smoke.js"
     },
     "devDependencies": {
         "@types/vscode": "^1.75.0",

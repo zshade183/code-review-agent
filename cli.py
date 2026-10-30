@@ -1,25 +1,18 @@
 """命令行工具。
 
-两种调用方式：
+多 Agent 是默认主线，三种审查策略共享同一入口：
 
-1. **无子命令调用**（``ci_integrate.sh`` 使用，务必保持可用）::
+.. code-block:: powershell
 
-       python cli.py <file> [--optimize] [--format text|json] [--output out.txt] [--fail-on-high-risk]
+    python cli.py review  demo.py                  # 默认 strategy=auto
+    python cli.py review  demo.py --strategy fast  # 单 Agent（编辑器实时检查基线）
+    python cli.py review  demo.py --strategy full  # 四领域 + Critic + Verifier
+    python cli.py fix     demo.py --yes            # 审查 → 用户确认 → 修复管线
+    python cli.py optimize demo.py                 # 兼容旧入口（等价于 fix 且自动确认）
 
-2. **子命令式调用**（功能更完整）::
+兼容调用（``ci_integrate.sh`` 使用，输出字段与退出码保持稳定）::
 
-       python cli.py review <file>            # Agent 审查（默认文本输出）
-       python cli.py optimize <file>          # 审查 + 带验证的优化
-       python cli.py multi <file>             # 多智能体协作审查
-       python cli.py trace <run_id>           # 查看某次运行的完整轨迹
-       python cli.py traces                   # 列出历史运行
-       python cli.py stats                    # 聚合统计（步数/token/成本/工具分布）
-       python cli.py memory add <text>        # 写入项目约定记忆
-       python cli.py memory list              # 查看记忆库
-       python cli.py candidates list          # 查看规范外候选子类型
-       python cli.py candidates promote ...   # 把候选晋升进白名单
-
-说明：无子命令调用同样走 Agent 管线，**输出结构与退出码保持不变**，CI 集成脚本依赖这一点。
+    python cli.py <file> [--optimize] [--format text|json] [--output out.txt] [--fail-on-high-risk]
 """
 
 from __future__ import annotations
@@ -36,6 +29,7 @@ from agent.trace import TraceStore, iter_run_lines  # noqa: E402
 
 SUBCOMMANDS = {
     "review",
+    "fix",
     "optimize",
     "multi",
     "trace",
@@ -43,6 +37,16 @@ SUBCOMMANDS = {
     "stats",
     "memory",
     "candidates",
+}
+
+STRATEGY_CHOICES = ("fast", "auto", "full")
+
+#: 裁决状态 -> 中文标签（CLI 文本输出）
+STATUS_LABELS = {
+    "confirmed": "已确认",
+    "needs_review": "待复核",
+    "memory_suspected": "记忆存疑",
+    "rejected": "已驳回",
 }
 
 
@@ -58,21 +62,80 @@ def _read_file(path: str) -> str:
         sys.exit(1)
 
 
-def _review_with_agent(code: str, file_path: str, codebase_root: Optional[str] = None):
-    from agent.reviewer_agent import ReviewerAgent
+def _build_pipeline(
+    codebase_root: Optional[str] = None,
+    use_memory: bool = True,
+    project: str = "default",
+    persist_traces: bool = True,
+):
+    from agent.pipelines import ReviewPipeline
 
-    agent = ReviewerAgent(codebase_root=codebase_root)
-    return agent.review(code, file_path=file_path)
+    memory = None
+    if use_memory:
+        from agent.memory import MemoryStore
+
+        memory = MemoryStore()
+    return ReviewPipeline(
+        codebase_root=codebase_root,
+        memory=memory,
+        project=project,
+        persist_traces=persist_traces,
+    )
 
 
-def _render_review_text(name: str, report: Any, run: Any) -> str:
-    lines = [f"=== Code Review Report: {name} ===", f"Summary: {report.review_summary}", ""]
-    lines.append("Issues Found:")
+# ---------------------------------------------------------------------------
+# 渲染
+# ---------------------------------------------------------------------------
+
+
+def _pipeline_trace(result: Any) -> Dict[str, Any]:
+    """把多角色轨迹压成 CI / 前端可消费的单一结构。"""
+    runs = result.runs
+    if not runs:
+        return {"roles": {}, "steps": 0, "usage": {"total_tokens": 0}, "tool_calls": {}}
+    if len(runs) == 1:
+        return next(iter(runs.values())).to_trace_dict()
+    total_tokens = sum(run.usage.total_tokens for run in runs.values())
+    tool_calls: Dict[str, int] = {}
+    stop_reasons: Dict[str, str] = {}
+    for role, run in runs.items():
+        stop_reasons[role] = run.stop_reason
+        for name, count in run.tool_call_stats().items():
+            tool_calls[name] = tool_calls.get(name, 0) + count
+    return {
+        "multi_agent": True,
+        "strategy": result.strategy.value,
+        "roles": {role: run.to_trace_dict() for role, run in runs.items()},
+        "steps": sum(len(run.steps) for run in runs.values()),
+        "tool_calls": dict(sorted(tool_calls.items(), key=lambda item: -item[1])),
+        "usage": {"total_tokens": total_tokens},
+        "stop_reasons": stop_reasons,
+        "duration_ms": round(result.elapsed_ms, 2),
+    }
+
+
+def _render_pipeline_text(name: str, result: Any) -> str:
+    """渲染多 Agent 审查结果（文本）。"""
+    report = result.report
+    stats = result.stats
+    lines = [
+        f"=== Code Review Report: {name} ===",
+        f"Strategy: {result.strategy.value}   ({result.orchestration.plan.reason})",
+        f"Summary: {report.review_summary}",
+        "",
+        "Issues Found:",
+    ]
     for index, issue in enumerate(report.issues, start=1):
+        status = issue.adjudication.value if issue.adjudication else "unadjudicated"
         lines.append(
             f"{index}. [{issue.dimension}] Line {issue.line_number}: {issue.risk_description}"
         )
-        lines.append(f"   Severity: {issue.severity.value}  Confidence: {issue.confidence:.2f}")
+        lines.append(
+            f"   Severity: {issue.severity.value}  Confidence: {issue.confidence:.2f}  "
+            f"Status: {STATUS_LABELS.get(status, status)} ({status})"
+        )
+        if issue.sources:
+            lines.append(f"   Sources: {'/'.join(issue.sources)}  candidate_id={issue.candidate_id}")
         if not issue.is_subtype_valid():
             lines.append(
                 f"   规范外候选: {issue.suggested_subtype or issue.subtype}"
@@ -84,24 +147,59 @@ def _render_review_text(name: str, report: Any, run: Any) -> str:
             lines.append(f"   Evidence[{source}]: {evidence.detail or evidence.snippet}")
         if issue.verify_note:
             lines.append(f"   Verify: {issue.verify_note}")
+        if issue.adjudication_reason:
+            lines.append(f"   Adjudication: {issue.adjudication_reason}")
+    if not report.issues:
+        lines.append("  （无问题）")
+
+    lines.append("")
+    lines.append("--- Coverage（部分成功可见）---")
+    for dimension, item in result.coverage.dimensions.items():
+        lines.append(
+            f"  {dimension:<12} {item.status:<10} issues={item.issues:<3} "
+            f"elapsed={item.elapsed_ms:.0f}ms {item.detail}"
+        )
+    lines.append(f"  partial={result.coverage.partial}")
+    lines.append("")
+    lines.append("--- 裁决统计 ---")
+    lines.append(f"  {json.dumps(stats.get('adjudication') or {}, ensure_ascii=False)}")
+    verifier = stats.get("verifier") or {}
+    lines.append(
+        f"  verifier: status={stats.get('verifier_status')} "
+        f"engines={verifier.get('engines_used')} corroborated={verifier.get('corroborated')}"
+    )
+    lines.append(f"  critic: {json.dumps(stats.get('critic') or {}, ensure_ascii=False)}")
+    lines.append(f"  tokens={stats.get('tokens')} elapsed={stats.get('elapsed_ms')}ms")
+
     lines.append("")
     lines.append("--- Agent Trace ---")
-    lines.append(
-        f"stop_reason={run.stop_reason}  steps={len(run.steps)}  "
-        f"tool_calls={sum(run.tool_call_stats().values())}  tokens={run.usage.total_tokens}  "
-        f"duration={run.duration_ms / 1000:.2f}s"
-    )
-    for step in run.steps:
-        lines.append(f"  [{step.index:02d}] {step.kind:<7} {step.brief(160)}")
+    for role, run in result.runs.items():
+        lines.append(
+            f"  [{role:<12}] stop={run.stop_reason:<14} steps={len(run.steps):<3} "
+            f"tools={sum(run.tool_call_stats().values()):<3} tokens={run.usage.total_tokens:<6} "
+            f"duration={run.duration_ms / 1000:.2f}s"
+        )
+    if len(result.runs) == 1:
+        only = next(iter(result.runs.values()))
+        for step in only.steps:
+            lines.append(f"      [{step.index:02d}] {step.kind:<7} {step.brief(160)}")
     return "\n".join(lines)
 
 
 def _has_high_risk(report: Any) -> bool:
-    return any(i.risk_level == "高" for i in report.issues)
+    return any(issue.risk_level == "高" for issue in report.issues)
+
+
+def _write_or_print(content: str, output: Optional[str]) -> None:
+    if output:
+        Path(output).write_text(content, encoding="utf-8")
+        print(f"Result saved to {output}")
+    else:
+        print(content)
 
 
 # ---------------------------------------------------------------------------
-# 无子命令调用
+# 无子命令调用（CI 兼容入口）
 # ---------------------------------------------------------------------------
 
 
@@ -121,47 +219,54 @@ def run_legacy(argv: List[str]) -> int:
         help="Return non-zero exit code if high risk issues are found",
     )
     parser.add_argument("--codebase-root", help="代码库根目录，启用检索类工具")
+    parser.add_argument(
+        "--strategy",
+        choices=STRATEGY_CHOICES,
+        default="auto",
+        help="审查策略（默认 auto：按证据选择领域 Agent）",
+    )
 
     args = parser.parse_args(argv)
     code = _read_file(args.file)
-    report, outcome = _review_with_agent(code, str(args.file), args.codebase_root)
+    pipeline = _build_pipeline(codebase_root=args.codebase_root, persist_traces=True)
+    result = pipeline.review(code, file_path=str(args.file), strategy=args.strategy)
 
-    result: Dict[str, Any] = {
+    output: Dict[str, Any] = {
         "file": str(args.file),
-        "review": report.to_legacy(),
-        "trace": outcome.run.to_trace_dict(),
+        "review": result.report.to_legacy(),
+        "trace": _pipeline_trace(result),
+        "strategy": result.strategy.value,
+        "coverage": result.coverage.to_dict(),
+        "stats": result.stats,
         "optimization": None,
     }
 
     optimization = None
     if args.optimize:
-        from agent.optimizer_agent import OptimizerAgent
+        from agent.pipelines import FixPipeline
 
-        optimizer = OptimizerAgent(codebase_root=args.codebase_root)
-        optimization, opt_run = optimizer.optimize(code, report)
-        result["optimization"] = optimization.to_legacy()
-        result["optimization_trace"] = opt_run.run.to_trace_dict()
+        fixer = FixPipeline(codebase_root=args.codebase_root)
+        plan = fixer.plan(code, result.report)
+        optimization, opt_outcome = fixer.fix(code, plan)
+        output["optimization"] = optimization.to_legacy()
+        output["optimization_trace"] = opt_outcome.run.to_trace_dict()
 
     if args.format == "json":
-        output_content = json.dumps(result, ensure_ascii=False, indent=2)
+        content = json.dumps(output, ensure_ascii=False, indent=2)
     else:
-        output_content = _render_review_text(Path(args.file).name, report, outcome.run)
+        content = _render_pipeline_text(Path(args.file).name, result)
         if optimization is not None:
-            output_content += "\n\n=== Code Optimization ===\n"
-            output_content += f"Summary: {optimization.summary}\n"
-            output_content += f"Signature Match: {optimization.signature_match}\n"
-            output_content += f"Verification: {json.dumps(optimization.verification.to_dict(), ensure_ascii=False)}\n"
-            output_content += "\nOptimized Code:\n------------------\n"
-            output_content += optimization.optimized_code
-            output_content += "\n------------------\n"
+            content += "\n\n=== Code Optimization ===\n"
+            content += f"Summary: {optimization.summary}\n"
+            content += f"Signature Match: {optimization.signature_match}\n"
+            content += f"Verification: {json.dumps(optimization.verification.to_dict(), ensure_ascii=False)}\n"
+            content += "\nOptimized Code:\n------------------\n"
+            content += optimization.optimized_code
+            content += "\n------------------\n"
 
-    if args.output:
-        Path(args.output).write_text(output_content, encoding="utf-8")
-        print(f"Result saved to {args.output}")
-    else:
-        print(output_content)
+    _write_or_print(content, args.output)
 
-    if args.fail_on_high_risk and _has_high_risk(report):
+    if args.fail_on_high_risk and _has_high_risk(result.report):
         print("\n[CI/CD ERROR] High risk issues found! Blocking pipeline.", file=sys.stderr)
         return 1
     return 0
@@ -174,72 +279,160 @@ def run_legacy(argv: List[str]) -> int:
 
 def _print_subcommands() -> None:
     print("可用子命令：")
-    print("  review    <file>    Agent 审查（文本或 JSON 输出）")
-    print("  optimize  <file>    审查 + 带三级验证的优化")
-    print("  multi     <file>    多智能体协作审查（Reviewer / Critic / Verifier）")
-    print("  trace     <run_id>  查看某次运行的完整轨迹")
+    print("  review     <file>   多 Agent 审查（--strategy fast|auto|full，默认 auto）")
+    print("  fix        <file>   审查 → 用户确认 → 修复管线（语法/接口/测试验证）")
+    print("  optimize   <file>   兼容入口：审查后自动选择问题并修复")
+    print("  multi      <file>   [已废弃] 等价于 review --strategy full")
+    print("  trace      <run_id> 查看某次角色运行的完整轨迹")
     print("  traces              列出历史运行")
     print("  stats               聚合统计")
-    print("  memory   （add|list）长期记忆管理")
-    print("  candidates（list|promote）规范外候选子类型管理")
+    print("  memory     （add|list）长期记忆管理")
+    print("  candidates （list|promote）规范外候选子类型管理")
 
 
 def cmd_review(argv: List[str]) -> int:
-    parser = argparse.ArgumentParser(prog="cli.py review", description="Agent 代码审查")
+    parser = argparse.ArgumentParser(prog="cli.py review", description="多 Agent 代码审查")
     parser.add_argument("file")
+    parser.add_argument("--strategy", choices=STRATEGY_CHOICES, default="auto")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--codebase-root")
+    parser.add_argument("--project", default="default")
+    parser.add_argument("--session-id", default="")
     parser.add_argument("--no-memory", action="store_true", help="禁用历史误报记忆")
     parser.add_argument("--output")
     args = parser.parse_args(argv)
 
-    from agent.memory import MemoryStore
-    from agent.reviewer_agent import ReviewerAgent
-
     code = _read_file(args.file)
-    if args.no_memory:
-        agent = ReviewerAgent(codebase_root=args.codebase_root)
-    else:
-        agent = ReviewerAgent(codebase_root=args.codebase_root, memory=MemoryStore())
-    report, outcome = agent.review(code, file_path=str(args.file))
+    pipeline = _build_pipeline(
+        codebase_root=args.codebase_root,
+        use_memory=not args.no_memory,
+        project=args.project,
+        persist_traces=True,
+    )
+    result = pipeline.review(
+        code, file_path=str(args.file), strategy=args.strategy, session_id=args.session_id
+    )
 
     if args.format == "json":
-        content = json.dumps(
-            {"report": report.to_legacy(), "trace": outcome.run.to_trace_dict()},
+        content = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+    else:
+        content = _render_pipeline_text(Path(args.file).name, result)
+    _write_or_print(content, args.output)
+    return 0
+
+
+def _ask_confirm(prompt: str) -> bool:
+    try:
+        answer = input(f"{prompt} [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in {"y", "yes", "是"}
+
+
+def cmd_fix(argv: List[str]) -> int:
+    parser = argparse.ArgumentParser(prog="cli.py fix", description="审查后修复选中问题")
+    parser.add_argument("file")
+    parser.add_argument("--strategy", choices=STRATEGY_CHOICES, default="auto")
+    parser.add_argument("--select", default="", help="逗号分隔的 candidate_id；缺省为全部已确认/待复核")
+    parser.add_argument("--include-memory-suspected", action="store_true")
+    parser.add_argument("--test-file", help="验收测试文件（用于沙箱验证）")
+    parser.add_argument("--yes", action="store_true", help="跳过人工确认（CI 使用）")
+    parser.add_argument("--format", choices=["text", "json"], default="text")
+    parser.add_argument("--codebase-root")
+    parser.add_argument("--project", default="default")
+    args = parser.parse_args(argv)
+
+    from agent.pipelines import FixPipeline
+
+    code = _read_file(args.file)
+    test_code = _read_file(args.test_file) if args.test_file else ""
+    pipeline = _build_pipeline(codebase_root=args.codebase_root, use_memory=False, project=args.project)
+    review = pipeline.review(code, file_path=str(args.file), strategy=args.strategy)
+    selected = [item.strip() for item in args.select.split(",") if item.strip()]
+    fixer = FixPipeline(codebase_root=args.codebase_root)
+    plan = fixer.plan(
+        code,
+        review.report,
+        candidate_ids=selected or None,
+        include_memory_suspected=args.include_memory_suspected,
+    )
+
+    if args.format != "json":
+        print("=== 修复计划 ===")
+        print(f"审查策略: {review.strategy.value}  候选: {len(review.report.issues)} 条")
+        for issue in plan.issues:
+            status = issue.adjudication.value if issue.adjudication else "unadjudicated"
+            print(
+                f"  [{issue.candidate_id}] {STATUS_LABELS.get(status, status)} "
+                f"{issue.category.value} / {issue.subtype} @行 {issue.line_start}"
+            )
+        for item in plan.excluded:
+            print(f"  [跳过] {item['candidate_id']}: {item['reason']}")
+        if plan.empty:
+            print("没有可修复的问题。")
+            return 0
+        if not args.yes and not _ask_confirm(f"确认修复以上 {len(plan.issues)} 个问题？"):
+            print("已取消，未执行 Fix Agent。")
+            return 0
+
+    result, outcome = fixer.fix(code, plan, test_code=test_code)
+
+    if args.format == "json":
+        print(json.dumps(
+            {
+                "plan": plan.to_dict(),
+                "result": result.to_legacy(),
+                "trace": outcome.run.to_trace_dict(),
+                "review_strategy": review.strategy.value,
+            },
             ensure_ascii=False,
             indent=2,
-        )
-    else:
-        content = _render_review_text(Path(args.file).name, report, outcome.run)
+        ))
+        return 0
 
-    if args.output:
-        Path(args.output).write_text(content, encoding="utf-8")
-        print(f"Result saved to {args.output}")
-    else:
-        print(content)
+    print("\n=== Verification ===")
+    for check in result.verification.checks:
+        mark = "PASS" if check.passed else "FAIL"
+        print(f"  [{mark}] {check.name}: {check.detail}")
+    print(f"\nSummary: {result.summary}")
+    print(f"Attempts: {result.attempts}  Changed: {result.changed}  "
+          f"ChangeRatio: {result.change_ratio:.2%}")
+    if result.patch:
+        print("\n=== Patch ===")
+        print(result.patch)
+    print("\n=== Optimized Code ===")
+    print(result.optimized_code)
     return 0
 
 
 def cmd_optimize(argv: List[str]) -> int:
-    parser = argparse.ArgumentParser(prog="cli.py optimize", description="Agent 代码优化")
+    """兼容入口：审查后自动选择问题并修复。"""
+    parser = argparse.ArgumentParser(prog="cli.py optimize", description="Agent 代码优化（兼容入口）")
     parser.add_argument("file")
     parser.add_argument("--test-file", help="验收测试文件（用于沙箱验证）")
     parser.add_argument("--codebase-root")
+    parser.add_argument("--strategy", choices=STRATEGY_CHOICES, default="auto")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     args = parser.parse_args(argv)
 
-    from agent.optimizer_agent import OptimizerAgent
+    from agent.pipelines import FixPipeline
 
     code = _read_file(args.file)
     test_code = _read_file(args.test_file) if args.test_file else ""
-    report, _ = _review_with_agent(code, str(args.file), args.codebase_root)
+    pipeline = _build_pipeline(codebase_root=args.codebase_root, use_memory=False)
+    review = pipeline.review(code, file_path=str(args.file), strategy=args.strategy)
 
-    optimizer = OptimizerAgent(codebase_root=args.codebase_root)
-    result, outcome = optimizer.optimize(code, report, test_code=test_code)
+    fixer = FixPipeline(codebase_root=args.codebase_root)
+    plan = fixer.plan(code, review.report, include_memory_suspected=True)
+    result, outcome = fixer.fix(code, plan, test_code=test_code)
 
     if args.format == "json":
         print(json.dumps(
-            {"result": result.to_legacy(), "trace": outcome.run.to_trace_dict()},
+            {
+                "result": result.to_legacy(),
+                "trace": outcome.run.to_trace_dict(),
+                "selected": [issue.candidate_id for issue in plan.issues],
+            },
             ensure_ascii=False,
             indent=2,
         ))
@@ -260,53 +453,9 @@ def cmd_optimize(argv: List[str]) -> int:
 
 
 def cmd_multi(argv: List[str]) -> int:
-    parser = argparse.ArgumentParser(prog="cli.py multi", description="多智能体协作审查")
-    parser.add_argument("file")
-    parser.add_argument("--codebase-root")
-    parser.add_argument("--format", choices=["text", "json"], default="text")
-    args = parser.parse_args(argv)
-
-    from agent.multi_agent import MultiAgentReviewPipeline
-
-    code = _read_file(args.file)
-    pipeline = MultiAgentReviewPipeline(codebase_root=args.codebase_root, persist_traces=True)
-    result = pipeline.review(code, file_path=str(args.file))
-
-    if args.format == "json":
-        print(json.dumps(
-            {
-                "report": result.report.to_legacy(),
-                "stats": result.stats,
-                "draft": result.draft.to_legacy(),
-                "verdicts": [v.model_dump() for v in result.verdicts],
-                "corroborations": [
-                    {"index": c.index, "corroborated": c.corroborated,
-                     "engines": c.engines, "note": c.note}
-                    for c in result.corroborations
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ))
-        return 0
-
-    print(f"=== 多智能体审查报告: {Path(args.file).name} ===")
-    print(f"Summary: {result.report.review_summary}\n")
-    for index, issue in enumerate(result.report.issues, start=1):
-        print(f"{index}. [{issue.dimension}] 行 {issue.line_number} — {issue.risk_description}")
-        print(f"   Severity: {issue.severity.value}  Confidence: {issue.confidence:.2f}")
-        if issue.verify_note:
-            print(f"   Verify: {issue.verify_note}")
-    print("\n--- 各角色统计 ---")
-    for key, value in result.stats.items():
-        print(f"  {key}: {value}")
-    print("\n--- Critic 裁定 ---")
-    verdict_map = {c.index: c for c in result.corroborations}
-    for verdict in result.verdicts:
-        corroboration = verdict_map.get(verdict.index)
-        mark = "有佐证" if corroboration and corroboration.corroborated else "无佐证"
-        print(f"  [{verdict.index}] {verdict.verdict:<10} ({mark}) {verdict.reason[:80]}")
-    return 0
+    """[已废弃] 等价于 ``review --strategy full``。"""
+    print("[deprecated] `multi` 子命令已并入 `review --strategy full`，请改用统一入口。", file=sys.stderr)
+    return cmd_review([*argv, "--strategy", "full"])
 
 
 def cmd_trace(argv: List[str]) -> int:
@@ -435,6 +584,7 @@ def cmd_candidates(argv: List[str]) -> int:
 
 HANDLERS = {
     "review": cmd_review,
+    "fix": cmd_fix,
     "optimize": cmd_optimize,
     "multi": cmd_multi,
     "trace": cmd_trace,

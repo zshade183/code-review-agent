@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -266,6 +267,7 @@ class ReviewerAgent:
         codebase_root: Optional[str] = None,
         memory: Optional[MemoryStore] = None,
         project: str = "default",
+        apply_memory_suppression: bool = True,
     ) -> None:
         self.client = client or LLMClient()
         self.registry = registry or build_reviewer_registry(codebase_root)
@@ -273,18 +275,26 @@ class ReviewerAgent:
         self.policy = policy or EvidencePolicy()
         self.memory = memory
         self.project = project
+        #: 多智能体主线下记忆压制必须发生在最终裁决之后，因此领域 Reviewer 会关掉它
+        self.apply_memory_suppression = apply_memory_suppression
         self.last_finalizer: Optional[_ReportFinalizer] = None
 
     # ------------------------------------------------------------------
 
-    def build_user_prompt(self, code: str, file_path: Optional[str] = None, extra_context: str = "") -> str:
+    def build_user_prompt(
+        self,
+        code: str,
+        file_path: Optional[str] = None,
+        extra_context: str = "",
+        session_id: str = "",
+    ) -> str:
         lines = code.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         numbered = "\n".join(f"{index + 1}| {line}" for index, line in enumerate(lines))
         header = f"待审查文件：{file_path}\n" if file_path else ""
         context = f"\n{extra_context}\n" if extra_context else ""
         memory_block = ""
         if self.memory is not None:
-            recalled = self.memory.build_context(code, project=self.project)
+            recalled = self.memory.build_context(code, project=self.project, session_id=session_id)
             if recalled:
                 memory_block = f"\n{recalled}\n"
         return (
@@ -305,6 +315,7 @@ class ReviewerAgent:
         extra_context: str = "",
         trace: Optional[TraceRecorder] = None,
         config: Optional[AgentConfig] = None,
+        session_id: str = "",
     ) -> Tuple[ReviewReport, RunOutcome]:
         """执行一次审查，返回 (报告, 运行轨迹)。"""
         cfg = config or self.config
@@ -325,8 +336,26 @@ class ReviewerAgent:
                 holder["impl"] = finalizer_impl
             return finalizer_impl(text)
 
+        if self.memory is not None:
+            self.memory.capture_perception(
+                self.project,
+                code,
+                source="code_review",
+                metadata={"file_path": file_path or ""},
+                session_id=session_id,
+            )
+        prompt = self.build_user_prompt(code, file_path, extra_context, session_id=session_id)
+        if self.memory is not None and session_id:
+            digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:12]
+            self.memory.remember_turn(
+                session_id,
+                "user",
+                f"请求审查 {file_path or '未命名代码'}（{len(code.splitlines())} 行，摘要 {digest}）",
+                project=self.project,
+            )
+
         outcome = runtime.run(
-            self.build_user_prompt(code, file_path, extra_context),
+            prompt,
             system_prompt=REVIEWER_SYSTEM_PROMPT + "\n" + output_schema_hint(),
             finalizer=finalizer,
             task="review",
@@ -348,8 +377,10 @@ class ReviewerAgent:
             outcome.run.output["dropped_issues"] = len(impl.dropped_issues)
             outcome.run.output["flagged_issues"] = len(impl.flagged_issues)
 
-        # 长期记忆：压制与历史误报高度一致的结论
-        if self.memory is not None and report.issues:
+        # 长期记忆：压制与历史误报高度一致的结论。
+        # 多 Agent 主线下必须关闭这里（apply_memory_suppression=False），把记忆压制
+        # 统一放到「确定性裁决之后」，避免在独立验证前就删掉候选。
+        if self.memory is not None and self.apply_memory_suppression and report.issues:
             in_spec = [issue for issue in report.issues if issue.is_subtype_valid()]
             kept, suppressed = self.memory.apply_suppression(self.project, in_spec, code)
             # 规范外候选免压制：尚未进入白名单，历史误报样本不能代表这一类问题
@@ -372,5 +403,28 @@ class ReviewerAgent:
             for issue in report.issues:
                 if not issue.is_subtype_valid():
                     self.memory.record_subtype_candidate(self.project, issue)
+
+        if self.memory is not None:
+            if session_id:
+                self.memory.remember_turn(
+                    session_id,
+                    "assistant",
+                    f"{report.review_summary}；保留 {len(report.issues)} 个问题",
+                    project=self.project,
+                    metadata={"issue_count": len(report.issues)},
+                )
+            if file_path:
+                self.memory.upsert_entity(
+                    self.project,
+                    "file",
+                    file_path,
+                    {
+                        "language": "python",
+                        "last_code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                        "line_count": len(code.splitlines()),
+                        "last_issue_count": len(report.issues),
+                    },
+                    source="review",
+                )
 
         return report, outcome

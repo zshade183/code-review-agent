@@ -83,6 +83,88 @@ def _parse_items(text: str, preferred_language: Optional[str]) -> Tuple[List[Dic
     )
 
 
+def _parse_issues(raw: Any, fallback_category: str = "") -> List[GtIssue]:
+    """把不同 schema 的标注统一成 ``GtIssue`` 列表。"""
+    issues: List[GtIssue] = []
+    if not isinstance(raw, list):
+        return issues
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        location = item.get("location") or {}
+        line_start = location.get("line_start", item.get("line_start", item.get("line", 0)))
+        line_end = location.get("line_end", item.get("line_end", line_start))
+        try:
+            line_start = int(line_start or 0)
+            line_end = int(line_end or line_start or 0)
+        except (TypeError, ValueError):
+            line_start, line_end = 0, 0
+        issues.append(
+            GtIssue(
+                category=str(item.get("category") or item.get("bug_category") or fallback_category).strip(),
+                subtype=str(item.get("subtype") or item.get("sub_category") or item.get("category") or "").strip(),
+                severity=str(item.get("severity") or item.get("risk_level") or "").strip(),
+                description=str(item.get("description") or item.get("risk_description") or "").strip(),
+                line_start=line_start,
+                line_end=line_end,
+            )
+        )
+    return issues
+
+
+def _normalize_item(item: Any) -> Optional[Sample]:
+    """把一条原始样本归一到 ``Sample``；无法识别时返回 ``None``。
+
+    支持三种历史 schema：
+
+    1. ``{id, language, code, fixed_code, issues:[{category, subtype, location}]}``（当前）
+    2. ``{code_id, language, code:{buggy, fixed}, issue:{category, sub_category, line}}``（BugSinPy）
+    3. ``{id, buggy_code, fixed_code, bug_category, bug_sub_category}``（扁平转换）
+    """
+    if not isinstance(item, dict):
+        return None
+
+    raw_code = item.get("code")
+    fixed_code = item.get("fixed_code")
+    if isinstance(raw_code, dict):
+        fixed_code = raw_code.get("fixed") or fixed_code
+        raw_code = raw_code.get("buggy") or raw_code.get("original") or ""
+    code = raw_code if isinstance(raw_code, str) else ""
+    if not code:
+        code = str(item.get("buggy_code") or "")
+    if not code:
+        return None
+
+    issues_raw = item.get("issues")
+    if isinstance(issues_raw, list) and issues_raw:
+        issues = _parse_issues(issues_raw, str(item.get("bug_category") or ""))
+    elif isinstance(item.get("issue"), dict):
+        issues = _parse_issues([item["issue"]], str(item.get("bug_category") or ""))
+    elif item.get("bug_category"):
+        issues = _parse_issues(
+            [
+                {
+                    "category": item.get("bug_category"),
+                    "sub_category": item.get("bug_sub_category"),
+                    "description": item.get("description"),
+                    "line": item.get("line") or item.get("line_start"),
+                }
+            ],
+            str(item.get("bug_category") or ""),
+        )
+    else:
+        issues = []
+
+    sample_id = str(item.get("id") or item.get("code_id") or item.get("sample_id") or "").strip()
+    return Sample(
+        sample_id=sample_id or f"sample-{abs(hash(code)) % 10**8}",
+        language=str(item.get("language") or "Python").strip(),
+        code=code,
+        fixed_code=fixed_code if isinstance(fixed_code, str) else None,
+        issues=issues,
+    )
+
+
 def load_dataset(
     path: Path,
     language: Optional[str] = "python",
@@ -99,35 +181,16 @@ def load_dataset(
 
     samples: List[Sample] = []
     for item in items:
-        lang = str(item.get("language") or "").strip()
+        sample = _normalize_item(item)
+        if sample is None:
+            dropped_items += 1
+            continue
+        lang = sample.language
         if language and lang.lower() != language.lower():
             dropped_items += 1
             continue
         kept_items += 1
-        issues: List[GtIssue] = []
-        for it in item.get("issues", []) or []:
-            if not isinstance(it, dict):
-                continue
-            loc = it.get("location") or {}
-            issues.append(
-                GtIssue(
-                    category=str(it.get("category") or "").strip(),
-                    subtype=str(it.get("subtype") or "").strip(),
-                    severity=str(it.get("severity") or "").strip(),
-                    description=str(it.get("description") or "").strip(),
-                    line_start=int(loc.get("line_start") or 1),
-                    line_end=int(loc.get("line_end") or int(loc.get("line_start") or 1)),
-                )
-            )
-        samples.append(
-            Sample(
-                sample_id=str(item.get("id") or "").strip(),
-                language=lang,
-                code=str(item.get("code") or ""),
-                fixed_code=str(item.get("fixed_code") or "") if item.get("fixed_code") is not None else None,
-                issues=issues,
-            )
-        )
+        samples.append(sample)
 
     rnd = random.Random(seed)
     rnd.shuffle(samples)

@@ -590,63 +590,442 @@ def test_optimization_result_legacy_shape() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 多智能体
+# 多 Agent 主线：策略 / 领域分流 / 确定性合并 / 裁决 / 部分成功 / 记忆
 # ---------------------------------------------------------------------------
 
 
-def test_multi_agent_pipeline_mock_end_to_end() -> None:
-    from agent.multi_agent import MultiAgentReviewPipeline
+def _mock_pipeline(memory=None, project="default"):
+    from agent.pipelines import ReviewPipeline
 
-    pipeline = MultiAgentReviewPipeline(client=LLMClient(mock=True), persist_traces=False)
-    result = pipeline.review(VULNERABLE_CODE, file_path="demo.py")
-    assert result.report.issues
-    assert result.runs.keys() == {"reviewer", "critic"}
-    # Critic 必须对每条问题都给出裁定，未覆盖的会被保守补为 keep
-    assert len(result.verdicts) == len(result.draft.issues)
-    assert result.stats["draft_issues"] >= result.stats["final_issues"]
-    assert "多智能体" in result.report.review_summary
+    return ReviewPipeline(
+        client=LLMClient(mock=True),
+        memory=memory,
+        project=project,
+        persist_traces=False,
+    )
 
 
-def test_merge_requires_agreement_to_drop() -> None:
-    from agent.multi_agent import Corroboration, IssueVerdict, MultiAgentReviewPipeline
+def test_review_pipeline_strategies_mock() -> None:
+    """三种策略都应产出报告；auto 只启动适用领域，full 固定四领域。"""
+    pipeline = _mock_pipeline()
 
-    def make_draft() -> ReviewReport:
-        return ReviewReport(
-            review_summary="draft",
-            issues=[
-                Issue(category=Category.SECURITY, severity=Severity.HIGH, subtype="SQL Injection",
-                      line_start=1, confidence=0.9),
-                Issue(category=Category.SMELL, severity=Severity.LOW, subtype="Magic Number",
-                      line_start=2, confidence=0.8),
-                Issue(category=Category.PERFORMANCE, severity=Severity.MEDIUM, subtype="Inefficient Loop",
-                      line_start=3, confidence=0.9),
-            ],
+    fast = pipeline.review(VULNERABLE_CODE, file_path="demo.py", strategy="fast")
+    auto = pipeline.review(VULNERABLE_CODE, file_path="demo.py", strategy="auto")
+    full = pipeline.review(VULNERABLE_CODE, file_path="demo.py", strategy="full")
+
+    for result in (fast, auto, full):
+        assert result.report.issues, "mock 后端应基于共享证据产出问题"
+        assert result.coverage.partial is False
+        assert result.stats["adjudication"]["rejected"] >= 0
+    assert fast.strategy.value == "fast"
+    assert fast.stats["plan"]["reviewer_roles"] == []
+    assert "single_agent" in fast.coverage.dimensions
+    # auto 按证据/特征选择领域：这段代码没有循环/批处理，不应启动性能审查
+    assert "performance" not in auto.stats["plan"]["reviewer_roles"]
+    assert 1 <= len(auto.stats["plan"]["reviewer_roles"]) <= 4
+    assert full.stats["plan"]["reviewer_roles"] == ["security", "bug", "quality", "performance"]
+    assert len(auto.stats["plan"]["reviewer_roles"]) <= len(full.stats["plan"]["reviewer_roles"])
+    # 每个报告的结论都带候选 ID 与裁决状态
+    for issue in full.report.issues:
+        assert issue.candidate_id.startswith("cand-")
+        assert issue.adjudication is not None
+
+
+def test_domain_reviewers_only_report_own_category() -> None:
+    from agent.schema import Category
+
+    expected = {
+        "security": Category.SECURITY,
+        "bug": Category.BUG,
+        "quality": Category.SMELL,
+        "performance": Category.PERFORMANCE,
+    }
+    result = _mock_pipeline().review(VULNERABLE_CODE, file_path="demo.py", strategy="full")
+    assert set(result.drafts) == set(expected)
+    for role, issues in result.drafts.items():
+        for issue in issues:
+            assert issue.category is expected[role], f"{role} 越界产出了 {issue.category}"
+    assert result.drafts["security"], "示例代码含 SQL 注入 / 命令注入，安全角色应有产出"
+
+
+def test_domain_reviewers_reuse_shared_static_evidence() -> None:
+    """领域 Reviewer 不应重复执行公共静态分析，但可引用 Collector 的真实工具证据。"""
+    from agent.evidence.collector import EvidenceCollector
+    from agent.reviewers import build_domain_reviewers
+
+    bundle = EvidenceCollector(engines=("rules",)).collect(VULNERABLE_CODE)
+    reviewers = build_domain_reviewers(["security"], client=LLMClient(mock=True))
+    reviewer = reviewers["security"]
+    assert "run_static_analysis" not in reviewer.registry.names()
+    assert "run_static_analysis" in bundle.shared_tool_names()
+
+    candidates, _outcome = reviewer.review(VULNERABLE_CODE, bundle, file_path="demo.py")
+    assert candidates
+    assert all(
+        "本轮未被调用" not in candidate.issue.verify_note for candidate in candidates
+    ), "公共证据不应被误判为 Reviewer 伪造的工具调用"
+
+
+def test_candidate_merger_is_deterministic_and_merges_sources() -> None:
+    from agent.adjudication.merger import CandidateMerger
+    from agent.schema import FindingCandidate, Issue
+
+    def candidate(reviewer: str, subtype: str, line: int, confidence: float) -> FindingCandidate:
+        return FindingCandidate(
+            reviewer=reviewer,
+            issue=Issue(
+                category=Category.SECURITY,
+                severity=Severity.HIGH,
+                subtype=subtype,
+                line_start=line,
+                confidence=confidence,
+                evidence=[{"kind": "tool_output", "tool": "run_static_analysis", "line": line}],
+            ),
         )
 
-    draft = make_draft()
-    verdicts = [
-        IssueVerdict(index=0, verdict="drop", reason="误判"),          # 但有佐证 -> 保留
-        IssueVerdict(index=1, verdict="drop", reason="风格偏好"),      # 无佐证 -> 丢弃
-        IssueVerdict(index=2, verdict="downgrade", reason="影响有限"),  # 降级
+    candidates = [
+        candidate("security", "SQL Injection", 6, 0.7),
+        candidate("bug", "SQL Injection", 6, 0.9),
+        candidate("security", "Command Injection", 12, 0.8),
     ]
-    corroborations = [
-        Corroboration(index=0, corroborated=True, engines=["pylint"], note="x"),
-        Corroboration(index=1, corroborated=False, engines=[], note="无同类告警"),
-        Corroboration(index=2, corroborated=True, engines=["bandit"], note="y"),
-    ]
-    merged = MultiAgentReviewPipeline._merge(draft, verdicts, corroborations)
+    merger = CandidateMerger()
+    first = merger.merge(candidates, total_lines=20)
+    second = merger.merge(list(reversed(candidates)), total_lines=20)
 
-    assert len(merged.issues) == 2
-    kept_sql = merged.issues[0]
-    assert kept_sql.disagreement is True and kept_sql.confidence <= 0.4
-    assert merged.issues[1].confidence == 0.6  # 0.9 - 0.3
-    # 初版报告不能被合并过程污染（返回给调用方时仍是原值）
-    assert len(draft.issues) == 3 and draft.issues[0].confidence == 0.9
-    assert draft.issues[0].disagreement is False
+    assert [issue.candidate_id for issue in first.issues] == [
+        issue.candidate_id for issue in second.issues
+    ]
+    assert len(first.issues) == 2
+    sql = next(issue for issue in first.issues if issue.subtype == "SQL Injection")
+    assert sql.sources == ["bug", "security"]
+    assert sql.confidence == 0.9
+
+
+def test_cross_agent_conflict_detection() -> None:
+    from agent.adjudication.merger import CandidateMerger
+    from agent.schema import FindingCandidate, Issue
+
+    def candidate(reviewer: str, category: Category, line: int) -> FindingCandidate:
+        return FindingCandidate(
+            reviewer=reviewer,
+            issue=Issue(
+                category=category,
+                severity=Severity.MEDIUM,
+                subtype="X",
+                line_start=line,
+                evidence=[{"kind": "code_snippet", "snippet": "x"}],
+            ),
+        )
+
+    same_role = CandidateMerger().merge(
+        [candidate("security", Category.SECURITY, 5), candidate("security", Category.BUG, 5)],
+        total_lines=20,
+    )
+    assert same_role.conflicts == [], "同一角色的不同类别结论不算跨角色冲突"
+
+    cross_role = CandidateMerger().merge(
+        [candidate("security", Category.SECURITY, 5), candidate("quality", Category.SMELL, 5)],
+        total_lines=20,
+    )
+    assert len(cross_role.conflicts) == 1
+    assert cross_role.conflict_ids <= set(cross_role.candidate_ids)
+
+
+def test_deterministic_adjudicator_statuses() -> None:
+    from agent.adjudication.critic import IssueVerdict
+    from agent.adjudication.policy import Adjudicator
+    from agent.evidence.verifier import Corroboration, VerificationResult
+    from agent.schema import AdjudicationStatus
+
+    def issue(subtype: str, line: int, confidence: float = 0.8) -> Issue:
+        return Issue(
+            category=Category.SECURITY,
+            severity=Severity.HIGH,
+            subtype=subtype,
+            line_start=line,
+            confidence=confidence,
+            evidence=[{"kind": "code_snippet", "snippet": "x"}],
+            verified=True,
+        )
+
+    issues = [
+        issue("SQL Injection", 1),                     # 有佐证 + 保留 -> confirmed
+        issue("Command Injection", 2),                 # Critic drop 且无佐证 -> rejected
+        issue("Hardcoded Sensitive Information", 3),   # 记忆命中 -> memory_suspected
+        issue("Insecure Deserialization", 4, 0.6),     # 无佐证且低置信 -> needs_review
+    ]
+    issue_ids = [item.ensure_candidate_id() for item in issues]
+    verdicts = {issue_ids[1]: IssueVerdict(index=0, verdict="drop", reason="误报")}
+    corroborations = {
+        issue_ids[0]: Corroboration(index=0, corroborated=True, engines=["bandit"], candidate_id=issue_ids[0]),
+        issue_ids[1]: Corroboration(index=1, corroborated=False, candidate_id=issue_ids[1]),
+        issue_ids[2]: Corroboration(index=2, corroborated=False, candidate_id=issue_ids[2]),
+        issue_ids[3]: Corroboration(index=3, corroborated=False, candidate_id=issue_ids[3]),
+    }
+    memory_flags = {issue_ids[2]: "历史误报率 100%"}
+    verification = VerificationResult(engines_used=["pylint"])
+
+    result = Adjudicator(confirm_confidence=0.65).adjudicate(
+        issues,
+        verdicts=verdicts,
+        corroborations=corroborations,
+        memory_flags=memory_flags,
+        verification=verification,
+    )
+    statuses = {item.subtype: item.adjudication for item in result.issues}
+    assert statuses["SQL Injection"] is AdjudicationStatus.CONFIRMED
+    assert statuses["Hardcoded Sensitive Information"] is AdjudicationStatus.MEMORY_SUSPECTED
+    assert statuses["Insecure Deserialization"] is AdjudicationStatus.NEEDS_REVIEW
+    assert [item.subtype for item in result.rejected] == ["Command Injection"]
+    # 记忆命中只降权分组，不删除
+    suspicious = next(
+        item for item in result.issues if item.adjudication is AdjudicationStatus.MEMORY_SUSPECTED
+    )
+    assert suspicious.confidence <= 0.4
+    assert result.counts()["rejected"] == 1
+
+
+def test_critic_selection_is_selective() -> None:
+    from agent.adjudication.critic import CriticPolicy
+    from agent.evidence.verifier import Corroboration
+    from agent.schema import Category, Severity
+
+    def issue(category, severity, confidence, subtype="X", line=1) -> Issue:
+        return Issue(
+            category=category,
+            severity=severity,
+            subtype=subtype,
+            line_start=line,
+            confidence=confidence,
+            evidence=[{"kind": "code_snippet", "snippet": "x"}],
+        )
+
+    low_risk = issue(Category.SMELL, Severity.LOW, 0.9, "Magic Number", 1)
+    risky = issue(Category.SECURITY, Severity.HIGH, 0.9, "SQL Injection", 2)
+    uncertain = issue(Category.BUG, Severity.MEDIUM, 0.5, "Type Error", 3)
+    issues = [low_risk, risky, uncertain]
+    corroborations = {
+        low_risk.ensure_candidate_id(): Corroboration(corroborated=True, engines=["pylint"]),
+        risky.ensure_candidate_id(): Corroboration(corroborated=True, engines=["bandit"]),
+        uncertain.ensure_candidate_id(): Corroboration(corroborated=False),
+    }
+    selection = CriticPolicy().select(issues, corroborations)
+    selected_ids = {item.ensure_candidate_id() for item in selection.issues}
+    assert low_risk.ensure_candidate_id() not in selected_ids, "低危 + 高置信 + 有佐证不必复核"
+    assert risky.ensure_candidate_id() in selected_ids
+    assert uncertain.ensure_candidate_id() in selected_ids
+
+
+def test_partial_success_when_one_reviewer_fails() -> None:
+    """一个领域失败不应让整次审查失败，覆盖度要明确标记。"""
+    from agent.reviewers.quality import QualityReviewer
+
+    original = QualityReviewer.review
+
+    def broken(self, *args, **kwargs):  # noqa: ANN001
+        raise RuntimeError("模拟领域 Reviewer 崩溃")
+
+    QualityReviewer.review = broken
+    try:
+        result = _mock_pipeline().review(VULNERABLE_CODE, file_path="demo.py", strategy="full")
+    finally:
+        QualityReviewer.review = original
+
+    assert result.coverage.partial is True
+    assert result.coverage.dimensions["quality"].status == "error"
+    assert result.coverage.dimensions["security"].status == "completed"
+    assert result.report.issues, "其余领域的结果必须照常返回"
+    assert result.drafts["security"]
+
+
+def test_memory_suppression_happens_after_adjudication(tmp_dir: Path) -> None:
+    """记忆命中只降权并单独分组，不在独立验证前删除候选。"""
+    from agent.evidence.verifier import VerifierAgent
+    from agent.memory import MemoryStore
+    from agent.orchestrator import ReviewOrchestrator
+    from agent.pipelines import ReviewPipeline
+    from agent.tools import build_reviewer_registry
+
+    store = MemoryStore(path=str(tmp_dir / "mem.jsonl"), suppress_min_reports=1)
+    target = Issue(
+        category=Category.SECURITY,
+        severity=Severity.HIGH,
+        subtype="Command Injection",
+        line_start=12,
+    )
+    store.record_feedback("demo", target, accepted=False, code=VULNERABLE_CODE)
+
+    original_engines = VerifierAgent.ENGINES
+    VerifierAgent.ENGINES = {}  # 让独立验证不可用，聚焦记忆策略本身
+    try:
+        orchestrator = ReviewOrchestrator(
+            client=LLMClient(mock=True),
+            memory=store,
+            project="demo",
+            persist_traces=False,
+            use_memory=True,
+        )
+        pipeline = ReviewPipeline(client=LLMClient(mock=True), memory=store, project="demo")
+        pipeline.orchestrator = orchestrator
+        result = pipeline.review(VULNERABLE_CODE, file_path="demo.py", strategy="full")
+    finally:
+        VerifierAgent.ENGINES = original_engines
+
+    command = [item for item in result.report.issues if item.subtype == "Command Injection"]
+    assert command, "命中历史误报的候选不能被直接删除"
+    assert command[0].adjudication is not None
+    assert command[0].confidence <= 0.4
+    assert "记忆" in (command[0].verify_note + command[0].adjudication_reason)
+
+
+def test_review_pipeline_result_to_dict_shape() -> None:
+    result = _mock_pipeline().review(VULNERABLE_CODE, file_path="demo.py", strategy="auto")
+    payload = result.to_dict()
+    for key in ("report", "strategy", "plan", "coverage", "stats", "evidence",
+                "draft", "rejected", "verdicts", "corroborations", "traces", "partial"):
+        assert key in payload, key
+    assert payload["strategy"] == "auto"
+    assert "adjudication" in payload["report"]["issues"][0] or not payload["report"]["issues"]
+
+
+def test_fix_pipeline_requires_user_selection_and_excludes_rejected() -> None:
+    from agent.pipelines import FixPipeline
+    from agent.schema import AdjudicationStatus
+
+    confirmed = Issue(
+        category=Category.BUG, severity=Severity.MEDIUM_HIGH, subtype="Type Error",
+        line_start=2, evidence=[{"kind": "code_snippet", "snippet": "x"}],
+        adjudication=AdjudicationStatus.CONFIRMED,
+    )
+    rejected = Issue(
+        category=Category.BUG, severity=Severity.LOW, subtype="Type Error",
+        line_start=3, evidence=[{"kind": "code_snippet", "snippet": "x"}],
+        adjudication=AdjudicationStatus.REJECTED,
+    )
+    suspected = Issue(
+        category=Category.SMELL, severity=Severity.LOW, subtype="Magic Number",
+        line_start=4, evidence=[{"kind": "code_snippet", "snippet": "x"}],
+        adjudication=AdjudicationStatus.MEMORY_SUSPECTED,
+    )
+    report = ReviewReport(review_summary="r", issues=[confirmed, rejected, suspected])
+
+    fixer = FixPipeline(client=LLMClient(mock=True))
+    plan = fixer.plan("def add(a, b):\n    return a - b\n", report)
+    selected = {issue.ensure_candidate_id() for issue in plan.issues}
+    assert confirmed.ensure_candidate_id() in selected
+    assert rejected.ensure_candidate_id() not in selected
+    assert suspected.ensure_candidate_id() not in selected
+
+    # 即使调用方显式传入 candidate_id，已驳回候选也不能绕过裁决进入修复。
+    explicit = fixer.plan(
+        "def add(a, b):\n    return a - b\n",
+        report,
+        candidate_ids=[rejected.ensure_candidate_id()],
+    )
+    assert explicit.empty
+    assert any("驳回" in item["reason"] for item in explicit.excluded)
+
+    only = fixer.plan(
+        "def add(a, b):\n    return a - b\n",
+        report,
+        candidate_ids=[suspected.ensure_candidate_id()],
+        include_memory_suspected=True,
+    )
+    assert [issue.ensure_candidate_id() for issue in only.issues] == [suspected.ensure_candidate_id()]
+
+    empty = fixer.plan("x = 1\n", ReviewReport(review_summary="", issues=[]))
+    assert empty.empty
+    result, _outcome = fixer.fix("x = 1\n", empty)
+    assert result.used_fallback is True and "未启动" in result.summary
+
+
+def test_verifier_does_not_reuse_non_independent_engines() -> None:
+    from agent.evidence.verifier import VerifierAgent
+
+    verifier = VerifierAgent()
+    engines, errors = verifier.select_engines(tuple(verifier.ENGINES))
+    assert engines == []
+    assert "independence" in errors
+
+
+def test_evidence_cache_refreshes_memory_hits(tmp_dir: Path) -> None:
+    from agent.evidence.store import EvidenceStore
+    from agent.memory import MemoryStore
+
+    memory = MemoryStore(path=str(tmp_dir / "mem.jsonl"))
+    evidence = EvidenceStore(max_entries=2)
+    code = "def log_value(value):\n    print(value)\n"
+    first = evidence.get_or_collect(code, project="proj", memory=memory)
+    assert first.memory_hits == []
+
+    memory.add_convention("proj", "print value 统一替换为 logging")
+    second = evidence.get_or_collect(code, project="proj", memory=memory)
+    assert evidence.hits == 1
+    assert any(hit.kind == "convention" for hit in second.memory_hits)
+
+
+def test_evidence_collector_includes_import_symbols_and_codebase_hits(tmp_dir: Path) -> None:
+    from agent.evidence.store import EvidenceStore
+
+    project = tmp_dir / "project"
+    project.mkdir()
+    (project / "helpers.py").write_text(
+        "def calculate_total(items):\n    return sum(items)\n", encoding="utf-8"
+    )
+    code = "import helpers\n\ndef calculate_total(items):\n    return helpers.calculate_total(items)\n"
+    bundle = EvidenceStore().get_or_collect(code, codebase_root=str(project))
+    assert "import helpers" in bundle.imports
+    assert any(item["name"] == "calculate_total" for item in bundle.symbols)
+    assert any(hit.get("path") == "helpers.py" for hit in bundle.codebase_hits)
+
+
+def test_sqlite_memory_and_jsonl_migration(tmp_dir: Path) -> None:
+    from agent.memory import MemoryStore
+
+    legacy = tmp_dir / "legacy.jsonl"
+    old = MemoryStore(path=str(legacy))
+    old.add_convention("proj", "统一使用参数化 SQL")
+
+    database = tmp_dir / "memory.db"
+    current = MemoryStore(path=str(database))
+    assert current.migrate_jsonl(str(legacy)) == 1
+    assert current.migrate_jsonl(str(legacy)) == 0
+    reloaded = MemoryStore(path=str(database)).load()
+    assert reloaded.sqlite_enabled is True
+    assert any(record.text == "统一使用参数化 SQL" for record in reloaded.records)
+
+
+def test_workflow_store_persists_review_and_fix_status(tmp_dir: Path) -> None:
+    from agent.workflow_store import WorkflowStore
+
+    store = WorkflowStore(str(tmp_dir / "workflows.db"))
+    review_id = store.save("review", "x = 1\n", {"report": {"issues": []}}, "reviewed")
+    fix_id = store.save(
+        "fix", "x = 1\n", {"candidate_ids": []}, "awaiting_confirmation", parent_id=review_id
+    )
+    assert store.get(fix_id)["parent_id"] == review_id
+    assert store.update_status(fix_id, "completed") is True
+    assert store.get(fix_id)["status"] == "completed"
+
+
+def test_llm_client_uses_thread_local_http_sessions() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    client = LLMClient(mock=True)
+    barrier = threading.Barrier(2)
+
+    def get_session(_index):  # noqa: ANN001
+        barrier.wait(timeout=2)
+        return client._session()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        sessions = list(executor.map(get_session, range(2)))
+    assert sessions[0] is not sessions[1]
 
 
 def test_verifier_uses_independent_engine() -> None:
-    from agent.multi_agent import VerifierAgent
+    from agent.evidence.verifier import VerifierAgent
 
     verifier = VerifierAgent()
     code = "x = 1\n"
@@ -676,6 +1055,20 @@ def test_verifier_uses_independent_engine() -> None:
     assert results[1].corroborated is False
 
 
+def test_verifier_verify_issues_uses_candidate_ids() -> None:
+    from agent.evidence.bundle import EvidenceBundle
+    from agent.evidence.verifier import VerifierAgent
+
+    issue = Issue(
+        category=Category.SECURITY, severity=Severity.HIGH, subtype="SQL Injection",
+        line_start=2, evidence=[{"kind": "code_snippet", "snippet": "x"}],
+    )
+    bundle = EvidenceBundle(code="a = 1\n", engines_used=["rules"])
+    result = VerifierAgent().verify_issues([issue], bundle, used_engines=["rules"])
+    assert issue.ensure_candidate_id() in result.corroborations
+    assert result.corroborations[issue.ensure_candidate_id()].candidate_id == issue.ensure_candidate_id()
+
+
 # ---------------------------------------------------------------------------
 # 长期记忆
 # ---------------------------------------------------------------------------
@@ -693,6 +1086,57 @@ def test_memory_convention_recall_and_context(tmp_dir: Path) -> None:
     context = store.build_context("cursor.execute(sql)", project="proj")
     assert "项目约定" in context
     assert "参数化 SQL" in context
+
+
+def test_perception_and_short_term_memory_are_bounded_and_transient(tmp_dir: Path) -> None:
+    from agent.memory import MemoryStore
+
+    path = tmp_dir / "mem.jsonl"
+    store = MemoryStore(path=str(path), short_term_limit=2, max_sessions=2)
+    store.capture_perception("proj", "print('secret')", session_id="s1")
+    perception = store.current_perception("proj", "s1")
+    assert perception is not None
+    assert perception.text == "print('secret')"
+    assert perception.payload["sha256"]
+
+    store.remember_turn("s1", "user", "第一次审查", project="proj")
+    store.remember_turn("s1", "assistant", "发现一个问题", project="proj")
+    store.remember_turn("s1", "user", "第二次审查", project="proj")
+    turns = store.session_turns("s1", "proj")
+    assert [turn.text for turn in turns] == ["发现一个问题", "第二次审查"]
+    assert "本会话短期记忆" in store.build_context("print", "proj", session_id="s1")
+
+    # 新实例只能读到持久层；原始源码与短期会话不会写入 JSONL。
+    reloaded = MemoryStore(path=str(path)).load()
+    assert reloaded.current_perception("proj", "s1") is None
+    assert reloaded.session_turns("s1", "proj") == []
+    assert not any(record.kind in {"perception", "turn"} for record in reloaded.records)
+    assert store.clear_session("s1", "proj") == 3
+
+
+def test_entity_memory_keeps_latest_version_and_project_isolation(tmp_dir: Path) -> None:
+    from agent.memory import MemoryStore
+
+    store = MemoryStore(path=str(tmp_dir / "mem.jsonl"))
+    first = store.upsert_entity(
+        "proj-a", "component", "payments", {"database": "sqlite"}, source="test"
+    )
+    latest = store.upsert_entity(
+        "proj-a", "component", "payments", {"database": "postgres"}, source="test"
+    )
+    store.upsert_entity("proj-b", "component", "payments", {"database": "mysql"})
+    store.add_convention("proj-a", "payments 只允许使用 postgres")
+
+    entities = store.entities("proj-a")
+    assert len(entities) == 1
+    assert entities[0].id == latest.id
+    assert entities[0].id != first.id
+    assert entities[0].payload["facts"]["database"] == "postgres"
+    assert store.entities("default") == []
+    assert store.recall("payments postgres", project="default", kinds=["convention"]) == []
+    context = store.build_context("payments postgres component", "proj-a")
+    assert "项目实体事实" in context
+    assert "postgres" in context
 
 
 def test_memory_suppresses_repeated_false_positive(tmp_dir: Path) -> None:
@@ -772,6 +1216,30 @@ def test_reviewer_agent_applies_memory(tmp_dir: Path) -> None:
     assert "压制" in report.review_summary
     assert not any(i.subtype == "Command Injection" for i in report.issues)
     assert outcome.run.output.get("suppressed_by_memory")
+
+
+def test_reviewer_agent_updates_layered_memory(tmp_dir: Path) -> None:
+    from agent.memory import MemoryStore
+    from agent.reviewer_agent import ReviewerAgent
+
+    store = MemoryStore(path=str(tmp_dir / "mem.jsonl"))
+    agent = ReviewerAgent(
+        client=LLMClient(mock=True),
+        config=AgentConfig(max_steps=6),
+        memory=store,
+        project="demo",
+    )
+    agent.review(VULNERABLE_CODE, file_path="src/demo.py", session_id="review-session")
+
+    perception = store.current_perception("demo", "review-session")
+    assert perception is not None
+    assert perception.payload["file_path"] == "src/demo.py"
+    turns = store.session_turns("review-session", "demo")
+    assert [turn.payload["role"] for turn in turns] == ["user", "assistant"]
+    files = store.entities("demo", entity_type="file")
+    assert len(files) == 1
+    assert files[0].payload["name"] == "src/demo.py"
+    assert files[0].payload["facts"]["line_count"] == len(VULNERABLE_CODE.splitlines())
 
 
 # ---------------------------------------------------------------------------
@@ -869,14 +1337,14 @@ def test_eval_loader_normalizes_all_schemas() -> None:
         }
     )
     assert nested is not None and nested.code == "a = 1" and nested.fixed_code == "a = 2"
-    assert nested.issues[0]["line_start"] == 0  # 行号未知 -> 0
+    assert nested.issues[0].line_start == 0  # 行号未知 -> 0
 
     # 形态 3：buggy_code / bug_category
     flat = _normalize_item(
         {"id": "f1", "buggy_code": "x=1", "fixed_code": "x=2",
          "bug_category": "Code Smell", "bug_sub_category": "Code Smell"}
     )
-    assert flat is not None and flat.code == "x=1" and flat.issues[0]["category"] == "Code Smell"
+    assert flat is not None and flat.code == "x=1" and flat.issues[0].category == "Code Smell"
 
     # 形态 1：issues 数组 + location
     standard = _normalize_item(
@@ -884,7 +1352,7 @@ def test_eval_loader_normalizes_all_schemas() -> None:
          "issues": [{"category": "Potential Bug", "subtype": "Type Error",
                      "location": {"line_start": 3, "line_end": 4}}]}
     )
-    assert standard is not None and standard.issues[0]["line_start"] == 3
+    assert standard is not None and standard.issues[0].line_start == 3
 
     assert _normalize_item({"foo": "bar"}) is None
 

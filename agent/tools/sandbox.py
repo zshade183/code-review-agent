@@ -5,9 +5,8 @@
 **能力与边界（务必如实了解）**：
 - 已做：独立子进程 + 超时强制终止 + ``-I`` 隔离模式（忽略用户 site-packages 与环境变量）
   + 临时工作目录 + AST 静态危险调用扫描 + 输出截断
-- 未做：操作系统级隔离（无容器 / 无 seccomp / 无 Windows Job Object），资源配额仅在
-  POSIX 上可用 ``resource`` 设置。因此本沙箱适合运行**受信任来源或 LLM 生成的小片段**，
-  不适合执行完全不可信的第三方代码。生产环境应替换为 Docker/Firecracker 等强隔离方案。
+- 可选：``AGENT_SANDBOX_BACKEND=docker`` 使用无网络、只读根文件系统、内存/CPU/PID
+  配额的容器。默认 ``subprocess`` 仍只适合受信任来源或 LLM 生成的小片段。
 
 之所以仍要提供它：Agent 若无法执行代码，就只能「猜测」修复是否正确，无法形成
 「提出修改 → 运行验证 → 失败则反思」的闭环。
@@ -202,7 +201,17 @@ def run_in_subprocess(
             path = workdir / Path(name).name
             path.write_text(content, encoding="utf-8")
 
-        cmd = [sys.executable, "-I", "-X", "utf8", str(target)]
+        if settings.SANDBOX_BACKEND == "docker":
+            mount = f"{workdir.resolve()}:/work:ro"
+            cmd = [
+                "docker", "run", "--rm", "--network", "none", "--read-only",
+                "--memory", "128m", "--cpus", "0.5", "--pids-limit", "64",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                "-v", mount, "-w", "/work", settings.SANDBOX_DOCKER_IMAGE,
+                "python", "-I", "-X", "utf8", "/work/snippet.py",
+            ]
+        else:
+            cmd = [sys.executable, "-I", "-X", "utf8", str(target)]
         creationflags = 0
         if sys.platform == "win32":  # pragma: no cover - 平台相关
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

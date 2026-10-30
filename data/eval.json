@@ -1,0 +1,1066 @@
+[
+  {
+    "id": "EVAL-V2-001",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。",
+    "code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = '\" + name + \"'\").fetchall()\n",
+    "fixed_code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = ?\", (name,)).fetchall()\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "High",
+        "description": "不可信字符串被拼接进 SQL。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-002",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. host 来自请求；调用系统 nslookup。",
+    "code": "# 1. host 来自请求；调用系统 nslookup。\nimport subprocess\ndef lookup(host):\n    return subprocess.run(\"nslookup \" + host, shell=True, capture_output=True)\n",
+    "fixed_code": "# 1. host 来自请求；调用系统 nslookup。\nimport subprocess\ndef lookup(host):\n    return subprocess.run([\"nslookup\", host], capture_output=True)\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "shell 会解释用户输入中的命令分隔符。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-003",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。",
+    "code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\nimport pickle\ndef decode(payload):\n    return pickle.loads(payload)\n",
+    "fixed_code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\nimport json\ndef decode(payload):\n    return json.loads(payload.decode(\"utf-8\"))\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Insecure Deserialization",
+        "severity": "High",
+        "description": "不可信 pickle 可以触发任意代码执行。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-004",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. expression 来自请求，协议只允许 JSON 数值或数组。",
+    "code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\ndef parse_expression(expression):\n    return eval(expression)\n",
+    "fixed_code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\nimport json\ndef parse_expression(expression):\n    return json.loads(expression)\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "High",
+        "description": "eval 会执行输入中的 Python 表达式。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-005",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自请求，返回值直接作为 HTML 响应正文。",
+    "code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\ndef greet(name):\n    return \"<h1>\" + name + \"</h1>\"\n",
+    "fixed_code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\nimport html\ndef greet(name):\n    return \"<h1>\" + html.escape(name) + \"</h1>\"\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "未转义输入可注入 HTML 与脚本。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-006",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 客户端需要生产服务的认证令牌；应从部署环境读取。",
+    "code": "# 1. 客户端需要生产服务的认证令牌；应从部署环境读取。\ndef service_headers():\n    token = \"prod-token-example-123456\"\n    return {\"Authorization\": \"Bearer \" + token}\n",
+    "fixed_code": "# 1. 客户端需要生产服务的认证令牌；应从部署环境读取。\nimport os\ndef service_headers():\n    return {\"Authorization\": \"Bearer \" + os.environ[\"SERVICE_TOKEN\"]}\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "认证令牌硬编码进源码，无法安全部署和轮换。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-007",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. values 为数值列表；空列表平均值约定返回 0。",
+    "code": "# 1. values 为数值列表；空列表平均值约定返回 0。\ndef average(values):\n    return sum(values) / len(values)\n",
+    "fixed_code": "# 1. values 为数值列表；空列表平均值约定返回 0。\ndef average(values):\n    return sum(values) / len(values) if values else 0\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium",
+        "description": "空列表会导致除零。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-008",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. items 为非空列表，返回最后一项。",
+    "code": "# 1. items 为非空列表，返回最后一项。\ndef last(items):\n    return items[len(items)]\n",
+    "fixed_code": "# 1. items 为非空列表，返回最后一项。\ndef last(items):\n    return items[-1]\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium",
+        "description": "长度不是合法下标。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-009",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. profile 是字典或 None；没有 profile 时返回 None。",
+    "code": "# 1. profile 是字典或 None；没有 profile 时返回 None。\ndef display_name(profile):\n    return profile.get(\"name\")\n",
+    "fixed_code": "# 1. profile 是字典或 None；没有 profile 时返回 None。\ndef display_name(profile):\n    return (profile or {}).get(\"name\")\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "None 没有 get 方法。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-010",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 18 岁及以上为成年人；age 为非负整数。",
+    "code": "# 1. 18 岁及以上为成年人；age 为非负整数。\ndef is_adult(age):\n    return age > 18\n",
+    "fixed_code": "# 1. 18 岁及以上为成年人；age 为非负整数。\ndef is_adult(age):\n    return age >= 18\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium",
+        "description": "18 岁被错误排除。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-011",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 返回摄氏温度对应的华氏温度，允许浮点值。",
+    "code": "# 1. 返回摄氏温度对应的华氏温度，允许浮点值。\ndef fahrenheit(celsius):\n    return celsius * 9 / 5 - 32\n",
+    "fixed_code": "# 1. 返回摄氏温度对应的华氏温度，允许浮点值。\ndef fahrenheit(celsius):\n    return celsius * 9 / 5 + 32\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium",
+        "description": "转换公式常数符号错误。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-012",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 仅管理员或资源所有者可以访问；参数均为布尔值。",
+    "code": "# 1. 仅管理员或资源所有者可以访问；参数均为布尔值。\ndef may_read(is_admin, is_owner):\n    return is_admin and is_owner\n",
+    "fixed_code": "# 1. 仅管理员或资源所有者可以访问；参数均为布尔值。\ndef may_read(is_admin, is_owner):\n    return is_admin or is_owner\n",
+    "issues": [
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium",
+        "description": "错误要求两个授权条件同时成立。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-013",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 计算圆面积，radius 为非负数；无导入副作用需求。",
+    "code": "# 1. 计算圆面积，radius 为非负数；无导入副作用需求。\nimport math\nimport statistics\ndef area(radius):\n    return math.pi * radius ** 2\n",
+    "fixed_code": "# 1. 计算圆面积，radius 为非负数；无导入副作用需求。\nimport math\ndef area(radius):\n    return math.pi * radius ** 2\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Medium",
+        "description": "statistics 从未使用。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-014",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。",
+    "code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\ndef attempt(operation):\n    try:\n        return operation()\n    except Exception:\n        return None\n",
+    "fixed_code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\ndef attempt(operation):\n    try:\n        return operation()\n    except ValueError:\n        return None\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Medium",
+        "description": "过宽捕获掩盖应传播的程序错误。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-015",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. value 为字符串，去掉首尾空白。",
+    "code": "# 1. value 为字符串，去掉首尾空白。\ndef normalize(value):\n    return value.strip()\n    value = \"unused\"\n",
+    "fixed_code": "# 1. value 为字符串，去掉首尾空白。\ndef normalize(value):\n    return value.strip()\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Medium",
+        "description": "return 后的语句永远不可达。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-016",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。",
+    "code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\ndef first_line(path):\n    stream = open(path, encoding=\"utf-8\")\n    return stream.readline()\n",
+    "fixed_code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\ndef first_line(path):\n    with open(path, encoding=\"utf-8\") as stream:\n        return stream.readline()\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "文件句柄未可靠关闭。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-017",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。",
+    "code": "# 1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。\ndef settings(host, port, user, password, database, timeout, retries):\n    return dict(host=host, port=port, user=user, password=password, database=database, timeout=timeout, retries=retries)\n",
+    "fixed_code": "# 1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。\ndef settings(options):\n    return dict(options)\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Medium",
+        "description": "七个位置参数违反项目明确接口约定。",
+        "location": {
+          "line_start": 2,
+          "line_end": 2
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-018",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。",
+    "code": "# 1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。\ndef clean_names(names):\n    return [name.strip().lower() for name in names]\ndef clean_tags(tags):\n    return [tag.strip().lower() for tag in tags]\n",
+    "fixed_code": "# 1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。\ndef clean_names(names):\n    return [name.strip().lower() for name in names]\ndef clean_tags(tags):\n    return clean_names(tags)\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Medium",
+        "description": "两处相同变换独立维护，违反共享实现约定。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-019",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. items 为大量可哈希整数，保序去重；目标平均 O(n)。",
+    "code": "# 1. items 为大量可哈希整数，保序去重；目标平均 O(n)。\ndef unique(items):\n    result = []\n    for item in items:\n        if item not in result:\n            result.append(item)\n    return result\n",
+    "fixed_code": "# 1. items 为大量可哈希整数，保序去重；目标平均 O(n)。\ndef unique(items):\n    return list(dict.fromkeys(items))\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表反复查重在全部不同元素时为 O(n²)。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-020",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. values 是大型整数列表；返回每项乘总和的列表。",
+    "code": "# 1. values 是大型整数列表；返回每项乘总和的列表。\ndef weighted(values):\n    return [value * sum(values) for value in values]\n",
+    "fixed_code": "# 1. values 是大型整数列表；返回每项乘总和的列表。\ndef weighted(values):\n    total = sum(values)\n    return [value * total for value in values]\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "每个元素都重新计算相同总和。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-021",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。",
+    "code": "# 1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef load_many(ids, fetch):\n    return [fetch(key) for key in ids]\n",
+    "fixed_code": "# 1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef load_many(ids, fetch):\n    cache = {key: fetch(key) for key in dict.fromkeys(ids)}\n    return [cache[key] for key in ids]\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant I/O/Database Query",
+        "severity": "Medium",
+        "description": "重复 ID 导致重复昂贵查询。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-022",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。",
+    "code": "# 1. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。\nimport copy\ndef count_records(records):\n    snapshot = copy.deepcopy(records)\n    return len(snapshot)\n",
+    "fixed_code": "# 1. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。\ndef count_records(records):\n    return len(records)\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "只读取长度却深拷贝全部嵌套对象。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-023",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。",
+    "code": "# 1. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。\ndef largest(items):\n    return sorted(items)[-1] if items else None\n",
+    "fixed_code": "# 1. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。\ndef largest(items):\n    return max(items) if items else None\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "仅求最大值却排序，复杂度 O(n log n)。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-024",
+    "language": "Python",
+    "sample_type": "single",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。",
+    "code": "# 1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef positive_transforms(values, transform):\n    return [transform(value) for value in values if transform(value) > 0]\n",
+    "fixed_code": "# 1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef positive_transforms(values, transform):\n    converted = map(transform, values)\n    return [value for value in converted if value > 0]\n",
+    "issues": [
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "通过过滤的元素被重复转换。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-025",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\n2. values 为数值列表；空列表平均值约定返回 0。",
+    "code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\n# 2. values 为数值列表；空列表平均值约定返回 0。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = '\" + name + \"'\").fetchall()\n\ndef average(values):\n    return sum(values) / len(values)\n",
+    "fixed_code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\n# 2. values 为数值列表；空列表平均值约定返回 0。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = ?\", (name,)).fetchall()\n\ndef average(values):\n    return sum(values) / len(values) if values else 0\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "SQL Injection",
+        "severity": "High",
+        "description": "不可信字符串被拼接进 SQL。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Division by Zero",
+        "severity": "Medium",
+        "description": "空列表会导致除零。",
+        "location": {
+          "line_start": 7,
+          "line_end": 7
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-026",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. host 来自请求；调用系统 nslookup。\n2. items 为非空列表，返回最后一项。",
+    "code": "# 1. host 来自请求；调用系统 nslookup。\n# 2. items 为非空列表，返回最后一项。\nimport subprocess\ndef lookup(host):\n    return subprocess.run(\"nslookup \" + host, shell=True, capture_output=True)\n\ndef last(items):\n    return items[len(items)]\n",
+    "fixed_code": "# 1. host 来自请求；调用系统 nslookup。\n# 2. items 为非空列表，返回最后一项。\nimport subprocess\ndef lookup(host):\n    return subprocess.run([\"nslookup\", host], capture_output=True)\n\ndef last(items):\n    return items[-1]\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Command Injection",
+        "severity": "High",
+        "description": "shell 会解释用户输入中的命令分隔符。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Index Out of Bounds",
+        "severity": "Medium",
+        "description": "长度不是合法下标。",
+        "location": {
+          "line_start": 8,
+          "line_end": 8
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-027",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\n2. profile 是字典或 None；没有 profile 时返回 None。",
+    "code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\n# 2. profile 是字典或 None；没有 profile 时返回 None。\nimport pickle\ndef decode(payload):\n    return pickle.loads(payload)\n\ndef display_name(profile):\n    return profile.get(\"name\")\n",
+    "fixed_code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\n# 2. profile 是字典或 None；没有 profile 时返回 None。\nimport json\ndef decode(payload):\n    return json.loads(payload.decode(\"utf-8\"))\n\ndef display_name(profile):\n    return (profile or {}).get(\"name\")\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Insecure Deserialization",
+        "severity": "High",
+        "description": "不可信 pickle 可以触发任意代码执行。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Null Pointer/None Check Missing",
+        "severity": "Medium",
+        "description": "None 没有 get 方法。",
+        "location": {
+          "line_start": 8,
+          "line_end": 8
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-028",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. expression 来自请求，协议只允许 JSON 数值或数组。\n2. 18 岁及以上为成年人；age 为非负整数。",
+    "code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\n# 2. 18 岁及以上为成年人；age 为非负整数。\ndef parse_expression(expression):\n    return eval(expression)\n\ndef is_adult(age):\n    return age > 18\n",
+    "fixed_code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\n# 2. 18 岁及以上为成年人；age 为非负整数。\nimport json\ndef parse_expression(expression):\n    return json.loads(expression)\n\ndef is_adult(age):\n    return age >= 18\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Dangerous Function Abuse",
+        "severity": "High",
+        "description": "eval 会执行输入中的 Python 表达式。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Boundary Condition Error",
+        "severity": "Medium",
+        "description": "18 岁被错误排除。",
+        "location": {
+          "line_start": 7,
+          "line_end": 7
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-029",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自请求，返回值直接作为 HTML 响应正文。\n2. 返回摄氏温度对应的华氏温度，允许浮点值。",
+    "code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\n# 2. 返回摄氏温度对应的华氏温度，允许浮点值。\ndef greet(name):\n    return \"<h1>\" + name + \"</h1>\"\n\ndef fahrenheit(celsius):\n    return celsius * 9 / 5 - 32\n",
+    "fixed_code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\n# 2. 返回摄氏温度对应的华氏温度，允许浮点值。\nimport html\ndef greet(name):\n    return \"<h1>\" + html.escape(name) + \"</h1>\"\n\ndef fahrenheit(celsius):\n    return celsius * 9 / 5 + 32\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Cross-Site Scripting (XSS)",
+        "severity": "High",
+        "description": "未转义输入可注入 HTML 与脚本。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Return Value Error",
+        "severity": "Medium",
+        "description": "转换公式常数符号错误。",
+        "location": {
+          "line_start": 7,
+          "line_end": 7
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-030",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 客户端需要生产服务的认证令牌；应从部署环境读取。\n2. 仅管理员或资源所有者可以访问；参数均为布尔值。",
+    "code": "# 1. 客户端需要生产服务的认证令牌；应从部署环境读取。\n# 2. 仅管理员或资源所有者可以访问；参数均为布尔值。\ndef service_headers():\n    token = \"prod-token-example-123456\"\n    return {\"Authorization\": \"Bearer \" + token}\n\ndef may_read(is_admin, is_owner):\n    return is_admin and is_owner\n",
+    "fixed_code": "# 1. 客户端需要生产服务的认证令牌；应从部署环境读取。\n# 2. 仅管理员或资源所有者可以访问；参数均为布尔值。\nimport os\ndef service_headers():\n    return {\"Authorization\": \"Bearer \" + os.environ[\"SERVICE_TOKEN\"]}\n\ndef may_read(is_admin, is_owner):\n    return is_admin or is_owner\n",
+    "issues": [
+      {
+        "category": "Security Vulnerability",
+        "subtype": "Hardcoded Sensitive Information",
+        "severity": "High",
+        "description": "认证令牌硬编码进源码，无法安全部署和轮换。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Potential Bug",
+        "subtype": "Logical Condition Error",
+        "severity": "Medium",
+        "description": "错误要求两个授权条件同时成立。",
+        "location": {
+          "line_start": 8,
+          "line_end": 8
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-031",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 计算圆面积，radius 为非负数；无导入副作用需求。\n2. items 为大量可哈希整数，保序去重；目标平均 O(n)。",
+    "code": "# 1. 计算圆面积，radius 为非负数；无导入副作用需求。\n# 2. items 为大量可哈希整数，保序去重；目标平均 O(n)。\nimport math\nimport statistics\ndef area(radius):\n    return math.pi * radius ** 2\n\ndef unique(items):\n    result = []\n    for item in items:\n        if item not in result:\n            result.append(item)\n    return result\n",
+    "fixed_code": "# 1. 计算圆面积，radius 为非负数；无导入副作用需求。\n# 2. items 为大量可哈希整数，保序去重；目标平均 O(n)。\nimport math\ndef area(radius):\n    return math.pi * radius ** 2\n\ndef unique(items):\n    return list(dict.fromkeys(items))\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unused Variable/Import",
+        "severity": "Medium",
+        "description": "statistics 从未使用。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Data Structure Misuse",
+        "severity": "Medium",
+        "description": "列表反复查重在全部不同元素时为 O(n²)。",
+        "location": {
+          "line_start": 11,
+          "line_end": 11
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-032",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\n2. values 是大型整数列表；返回每项乘总和的列表。",
+    "code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\n# 2. values 是大型整数列表；返回每项乘总和的列表。\ndef attempt(operation):\n    try:\n        return operation()\n    except Exception:\n        return None\n\ndef weighted(values):\n    return [value * sum(values) for value in values]\n",
+    "fixed_code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\n# 2. values 是大型整数列表；返回每项乘总和的列表。\ndef attempt(operation):\n    try:\n        return operation()\n    except ValueError:\n        return None\n\ndef weighted(values):\n    total = sum(values)\n    return [value * total for value in values]\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Improper Exception Handling",
+        "severity": "Medium",
+        "description": "过宽捕获掩盖应传播的程序错误。",
+        "location": {
+          "line_start": 6,
+          "line_end": 6
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "每个元素都重新计算相同总和。",
+        "location": {
+          "line_start": 10,
+          "line_end": 10
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-033",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. value 为字符串，去掉首尾空白。\n2. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。",
+    "code": "# 1. value 为字符串，去掉首尾空白。\n# 2. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef normalize(value):\n    return value.strip()\n    value = \"unused\"\n\ndef load_many(ids, fetch):\n    return [fetch(key) for key in ids]\n",
+    "fixed_code": "# 1. value 为字符串，去掉首尾空白。\n# 2. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef normalize(value):\n    return value.strip()\n\ndef load_many(ids, fetch):\n    cache = {key: fetch(key) for key in dict.fromkeys(ids)}\n    return [cache[key] for key in ids]\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Redundant Code/Dead Code",
+        "severity": "Medium",
+        "description": "return 后的语句永远不可达。",
+        "location": {
+          "line_start": 5,
+          "line_end": 5
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant I/O/Database Query",
+        "severity": "Medium",
+        "description": "重复 ID 导致重复昂贵查询。",
+        "location": {
+          "line_start": 8,
+          "line_end": 8
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-034",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\n2. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。",
+    "code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\n# 2. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。\ndef first_line(path):\n    stream = open(path, encoding=\"utf-8\")\n    return stream.readline()\n\nimport copy\ndef count_records(records):\n    snapshot = copy.deepcopy(records)\n    return len(snapshot)\n",
+    "fixed_code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\n# 2. records 为大型嵌套 JSON 列表；只读且只需获得记录条数。\ndef first_line(path):\n    with open(path, encoding=\"utf-8\") as stream:\n        return stream.readline()\n\ndef count_records(records):\n    return len(records)\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Unreleased Resource",
+        "severity": "Medium",
+        "description": "文件句柄未可靠关闭。",
+        "location": {
+          "line_start": 4,
+          "line_end": 4
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Unnecessary Deep Copy",
+        "severity": "Medium",
+        "description": "只读取长度却深拷贝全部嵌套对象。",
+        "location": {
+          "line_start": 9,
+          "line_end": 9
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-035",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。\n2. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。",
+    "code": "# 1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。\n# 2. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。\ndef settings(host, port, user, password, database, timeout, retries):\n    return dict(host=host, port=port, user=user, password=password, database=database, timeout=timeout, retries=retries)\n\ndef largest(items):\n    return sorted(items)[-1] if items else None\n",
+    "fixed_code": "# 1. 项目约定配置函数最多 5 个位置参数；将独立配置项封装为映射。\n# 2. items 为大型可排序整数列表；仅返回最大值，空列表返回 None；目标 O(n)。\ndef settings(options):\n    return dict(options)\n\ndef largest(items):\n    return max(items) if items else None\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Too Many Parameters",
+        "severity": "Medium",
+        "description": "七个位置参数违反项目明确接口约定。",
+        "location": {
+          "line_start": 3,
+          "line_end": 3
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Inefficient Loop",
+        "severity": "Medium",
+        "description": "仅求最大值却排序，复杂度 O(n log n)。",
+        "location": {
+          "line_start": 7,
+          "line_end": 7
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-036",
+    "language": "Python",
+    "sample_type": "multi",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。\n2. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。",
+    "code": "# 1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。\n# 2. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef clean_names(names):\n    return [name.strip().lower() for name in names]\ndef clean_tags(tags):\n    return [tag.strip().lower() for tag in tags]\n\ndef positive_transforms(values, transform):\n    return [transform(value) for value in values if transform(value) > 0]\n",
+    "fixed_code": "# 1. 两个公开函数都需把字符串列表去空白转小写；项目要求共享同一实现。\n# 2. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef clean_names(names):\n    return [name.strip().lower() for name in names]\ndef clean_tags(tags):\n    return clean_names(tags)\n\ndef positive_transforms(values, transform):\n    converted = map(transform, values)\n    return [value for value in converted if value > 0]\n",
+    "issues": [
+      {
+        "category": "Code Smell",
+        "subtype": "Duplicate Code",
+        "severity": "Medium",
+        "description": "两处相同变换独立维护，违反共享实现约定。",
+        "location": {
+          "line_start": 6,
+          "line_end": 6
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      },
+      {
+        "category": "Performance Issue",
+        "subtype": "Redundant Calculation",
+        "severity": "Medium",
+        "description": "通过过滤的元素被重复转换。",
+        "location": {
+          "line_start": 9,
+          "line_end": 9
+        },
+        "fix_suggestion": "参见 fixed_code 中对应函数的修复。"
+      }
+    ]
+  },
+  {
+    "id": "EVAL-V2-037",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。",
+    "code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = ?\", (name,)).fetchall()\n",
+    "fixed_code": "# 1. name 来自 HTTP 请求；cursor 是 sqlite3 游标。\ndef find_user(cursor, name):\n    return cursor.execute(\"SELECT id FROM users WHERE name = ?\", (name,)).fetchall()\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-038",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. host 来自请求；调用系统 nslookup。",
+    "code": "# 1. host 来自请求；调用系统 nslookup。\nimport subprocess\ndef lookup(host):\n    return subprocess.run([\"nslookup\", host], capture_output=True)\n",
+    "fixed_code": "# 1. host 来自请求；调用系统 nslookup。\nimport subprocess\ndef lookup(host):\n    return subprocess.run([\"nslookup\", host], capture_output=True)\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-039",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。",
+    "code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\nimport json\ndef decode(payload):\n    return json.loads(payload.decode(\"utf-8\"))\n",
+    "fixed_code": "# 1. payload 是客户端上传的 UTF-8 JSON 字节，应解析为对象。\nimport json\ndef decode(payload):\n    return json.loads(payload.decode(\"utf-8\"))\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-040",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. expression 来自请求，协议只允许 JSON 数值或数组。",
+    "code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\nimport json\ndef parse_expression(expression):\n    return json.loads(expression)\n",
+    "fixed_code": "# 1. expression 来自请求，协议只允许 JSON 数值或数组。\nimport json\ndef parse_expression(expression):\n    return json.loads(expression)\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-041",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. name 来自请求，返回值直接作为 HTML 响应正文。",
+    "code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\nimport html\ndef greet(name):\n    return \"<h1>\" + html.escape(name) + \"</h1>\"\n",
+    "fixed_code": "# 1. name 来自请求，返回值直接作为 HTML 响应正文。\nimport html\ndef greet(name):\n    return \"<h1>\" + html.escape(name) + \"</h1>\"\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-042",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. values 为数值列表；空列表平均值约定返回 0。",
+    "code": "# 1. values 为数值列表；空列表平均值约定返回 0。\ndef average(values):\n    return sum(values) / len(values) if values else 0\n",
+    "fixed_code": "# 1. values 为数值列表；空列表平均值约定返回 0。\ndef average(values):\n    return sum(values) / len(values) if values else 0\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-043",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. items 为非空列表，返回最后一项。",
+    "code": "# 1. items 为非空列表，返回最后一项。\ndef last(items):\n    return items[-1]\n",
+    "fixed_code": "# 1. items 为非空列表，返回最后一项。\ndef last(items):\n    return items[-1]\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-044",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. profile 是字典或 None；没有 profile 时返回 None。",
+    "code": "# 1. profile 是字典或 None；没有 profile 时返回 None。\ndef display_name(profile):\n    return (profile or {}).get(\"name\")\n",
+    "fixed_code": "# 1. profile 是字典或 None；没有 profile 时返回 None。\ndef display_name(profile):\n    return (profile or {}).get(\"name\")\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-045",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. 18 岁及以上为成年人；age 为非负整数。",
+    "code": "# 1. 18 岁及以上为成年人；age 为非负整数。\ndef is_adult(age):\n    return age >= 18\n",
+    "fixed_code": "# 1. 18 岁及以上为成年人；age 为非负整数。\ndef is_adult(age):\n    return age >= 18\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-046",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。",
+    "code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\ndef attempt(operation):\n    try:\n        return operation()\n    except ValueError:\n        return None\n",
+    "fixed_code": "# 1. operation 无参数；仅 ValueError 应返回 None，其余错误必须传播。\ndef attempt(operation):\n    try:\n        return operation()\n    except ValueError:\n        return None\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-047",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。",
+    "code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\ndef first_line(path):\n    with open(path, encoding=\"utf-8\") as stream:\n        return stream.readline()\n",
+    "fixed_code": "# 1. path 指向存在的 UTF-8 文件；读取首行，每次调用必须关闭句柄。\ndef first_line(path):\n    with open(path, encoding=\"utf-8\") as stream:\n        return stream.readline()\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-048",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. items 为大量可哈希整数，保序去重；目标平均 O(n)。",
+    "code": "# 1. items 为大量可哈希整数，保序去重；目标平均 O(n)。\ndef unique(items):\n    return list(dict.fromkeys(items))\n",
+    "fixed_code": "# 1. items 为大量可哈希整数，保序去重；目标平均 O(n)。\ndef unique(items):\n    return list(dict.fromkeys(items))\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-049",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。",
+    "code": "# 1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef load_many(ids, fetch):\n    cache = {key: fetch(key) for key in dict.fromkeys(ids)}\n    return [cache[key] for key in ids]\n",
+    "fixed_code": "# 1. ids 可含重复整数；fetch 是无副作用的昂贵查询，结果在调用期间稳定。\ndef load_many(ids, fetch):\n    cache = {key: fetch(key) for key in dict.fromkeys(ids)}\n    return [cache[key] for key in ids]\n",
+    "issues": []
+  },
+  {
+    "id": "EVAL-V2-050",
+    "language": "Python",
+    "sample_type": "clean",
+    "provenance": "synthetic-curated-v2",
+    "requirements": "1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。",
+    "code": "# 1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef positive_transforms(values, transform):\n    converted = map(transform, values)\n    return [value for value in converted if value > 0]\n",
+    "fixed_code": "# 1. values 为大型浮点列表，转换器 transform 是纯函数且计算昂贵；保留转换后正值。\ndef positive_transforms(values, transform):\n    converted = map(transform, values)\n    return [value for value in converted if value > 0]\n",
+    "issues": []
+  }
+]

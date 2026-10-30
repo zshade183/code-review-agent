@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "samples": 50,
+  "sample_types": {
+    "single": 24,
+    "multi": 12,
+    "clean": 14
+  },
+  "issues": 48,
+  "categories": {
+    "Security Vulnerability": 12,
+    "Potential Bug": 12,
+    "Code Smell": 12,
+    "Performance Issue": 12
+  },
+  "sha256": "82646be75ae14179be15178f4803d6a996a564224d900cd3843925be4568a6d7"
+}
