@@ -18,9 +18,9 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m compileall -q agent api review_assistant experiments
+      - run: python -m compileall -q agent api experiments
       - run: python test/test_agent.py
-      - run: python test/test_review_assistant.py
+      - run: python test/test_langgraph_agent.py
       - run: python test/test_dataset_loader.py
       - run: python test/test_web_app.py
       - uses: actions/setup-node@v4

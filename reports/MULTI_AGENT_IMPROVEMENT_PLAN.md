@@ -1,9 +1,12 @@
 # 多 Agent 主线改进与实施文档
 
-> 实施状态（2026-10-30）：主线重构已经落地。当前已具备共享证据、`fast/auto/full`
-> 策略、四领域并行 Reviewer、确定性合并、选择性 Critic、独立 Verifier、裁决后记忆调整、
-> 部分成功和独立 Fix Pipeline。SQLite 记忆、持久化人工确认、服务鉴权/限流、Docker
-> 执行隔离选项、CI 工作流和多 Agent 消融实验协议也已实现；实验脚本暂未实际运行。
+> 本文记录早期四领域并行方案。当前正式设计已收敛为 Review、Verification、Fix 三角色，
+> 以后续文档 `THREE_AGENT_REFACTOR_PLAN.md` 为准。
+
+> 实施状态（2026-10-30）：本方案已在 `agent/langgraph/` 落地。正式主线采用固定
+> LangGraph 拓扑，具备一次公共基础取证、`fast/auto/full` 真实执行计划、领域 Agent
+> 并行和上下文隔离、独立只读工具白名单、短 ReAct 补充取证、确定性合并、条件式跨领域
+> 复核与独立 Verifier 并行、规则裁决、裁决后记忆调整、部分成功和独立 Fix Pipeline。
 
 如果确定以多 Agent 为主线，这是可行的，而且更符合项目的差异化定位。但不建议直接把当前 LangGraph Supervisor 版本设为主线，而应该建设一套“确定性编排的多 Agent 审查管线”。
 
@@ -21,9 +24,9 @@
 
 ```text
 Evidence Collector
-→ 领域 Reviewer 并行审查
+→ 领域 Agent 并行审查与按需补充取证
 → Candidate Merger
-→ Critic / Verifier 并行复核
+→ Cross Review / Verifier 并行复核
 → Deterministic Adjudicator
 → Memory Adjustment
 → Final Report
@@ -204,25 +207,12 @@ agent/
 ├── schema.py
 ├── memory.py
 ├── trace.py
-├── orchestrator.py
-│
-├── evidence/
-│   ├── collector.py
-│   ├── store.py
-│   └── verifier.py
-│
-├── reviewers/
-│   ├── base.py
-│   ├── security.py
-│   ├── bug.py
-│   ├── quality.py
-│   └── performance.py
-│
-├── adjudication/
-│   ├── merger.py
-│   ├── critic.py
-│   ├── policy.py
-│   └── memory_policy.py
+├── langgraph/
+│   ├── workflow.py      # 固定拓扑及全部确定性节点
+│   ├── state.py         # 并行 reducer 和共享状态
+│   ├── toolset.py       # 公共取证资源
+│   ├── llm.py           # 模型工厂
+│   └── mock_llm.py      # 离线图测试
 │
 ├── pipelines/
 │   ├── review.py

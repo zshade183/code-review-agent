@@ -1,15 +1,12 @@
 """代码审查 Agent 包（多 Agent 主线）。
 
-项目定位：**基于共享证据、领域专家协作、独立验证和确定性裁决的多 Agent 代码审查系统。**
+项目定位：**基于 LangGraph 状态图、领域专家协作和证据校验的多 Agent 代码审查系统。**
 
-主线架构（确定性拓扑，Python 决定流程而不是 LLM）::
+主线架构::
 
-    Evidence Collector
-    → 领域 Reviewer 并行审查（Security / Bug / Quality / Performance）
-    → Candidate Merger（确定性合并）
-    → Critic / Verifier 并行复核
-    → Deterministic Adjudicator
-    → Memory Adjustment
+    基础上下文
+    → Review Agent 自主取证
+    → 条件式 Verification Agent → 确定性裁决
     → Final Report
     → 用户确认
     → Fix Agent（独立第二条管线）
@@ -17,17 +14,15 @@
 分层：
 
 - ``schema``        ：Pydantic 数据契约（Issue / FindingCandidate / 覆盖度 / 裁决状态）
-- ``evidence``      ：一次性公共取证（collector / store / verifier）
-- ``reviewers``     ：四个领域 Reviewer 与动态选择
-- ``adjudication``  ：确定性合并、选择性 Critic、规则裁决、记忆策略
-- ``orchestrator``  ：确定性编排（并行调度 / 预算 / 超时 / 部分成功）
+- ``langgraph``     ：固定状态图、并行评审、证据校验与确定性裁决
 - ``pipelines``     ：Review Pipeline 与 Fix Pipeline 两条正式入口
-- ``fixing``        ：Fix Agent 与三级验证（唯一拥有写/执行能力的地方）
-- ``runtime``       ：手写轻量 ReAct Agent Loop
+- ``fixing``        ：Fix Agent 与确定性交付 Harness
+- ``executors``     ：Review / Verification / Fix 共用的工具调用执行器
+- ``runtime``       ：旧执行 API 的兼容门面
 - ``memory``        ：四层记忆（感知 / 短期 / 长期 / 实体）
 - ``trace``         ：可观测性（单次 run 全链路轨迹 + token/成本统计）
 
-单 Agent 保留为 ``fast`` 策略（``ReviewerAgent``）与实验基线，不再是默认入口。
+所有正式入口都通过 ``pipelines.ReviewPipeline`` 进入 LangGraph。
 """
 
 from agent.schema import (

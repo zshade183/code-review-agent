@@ -2,12 +2,12 @@
 
 与 Review Pipeline 严格分离：
 
-- 审查阶段（Reviewers / Critic / Verifier）只读，不产生任何代码改动
+- 审查阶段的领域助手只读，不产生任何代码改动
 - 修复阶段由用户确认要修哪些候选（``candidate_ids``）后才启动
 - 修复结果必须通过 harness 的三级验证；不通过则回退原代码
 
-这样才能避免「审查角色顺手改代码」带来的不可审计性，也让 Fix Agent 成为唯一
-拥有补丁 / 执行 / 测试工具的角色。
+这样才能避免「审查角色顺手改代码」带来的不可审计性。Fix Agent 只生成候选，
+最终补丁、验证与失败回退由确定性 Harness 掌握。
 """
 
 from __future__ import annotations
@@ -160,6 +160,7 @@ class FixPipeline:
     ) -> "tuple[OptimizationResult, RunOutcome]":
         recorder = trace or TraceRecorder(task="fix")
         if plan.empty:
+            recorder.mark_stop("skipped")
             run = recorder.build(output={"selected": 0, "reason": "empty-plan"})
             result = OptimizationResult(
                 original_code=code,
@@ -169,6 +170,7 @@ class FixPipeline:
                 summary="没有选中任何可修复问题，Fix Agent 未启动（审查与修复是两条独立管线）。",
                 used_fallback=True,
             )
+            recorder.persist(run)
             return result, RunOutcome(run=run, value=result)
 
         report = ReviewReport(
@@ -187,6 +189,8 @@ class FixPipeline:
                 "used_fallback": result.used_fallback,
             }
         )
+        # 轨迹必须落盘，前端才能按 run_id 查询 /agent/trace/{run_id} 并纳入 /agent/stats 聚合
+        recorder.persist(outcome.run)
         return result, outcome
 
 

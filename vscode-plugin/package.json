@@ -75,7 +75,7 @@
                         "full"
                     ],
                     "default": "auto",
-                    "description": "审查策略：fast=单 Agent（最快）；auto=按证据选择领域（默认）；full=四领域 + Critic + Verifier（最严格）"
+                    "description": "fast 仅初审；auto 风险候选复核；full 全部候选复核"
                 }
             }
         }

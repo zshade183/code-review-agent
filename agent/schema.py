@@ -54,13 +54,13 @@ class AdjudicationStatus(str, Enum):
 
 
 class ReviewStrategy(str, Enum):
-    """审查策略：多 Agent 是默认能力，但不是每次请求都无条件调用全部角色。"""
+    """LangGraph 审查档位；决定初审预算和独立复核范围。"""
 
-    #: 单 Reviewer + 基础验证（编辑器实时检查、低延迟场景）
+    #: 兼容低延迟客户端标记
     FAST = "fast"
-    #: 依据公共证据与代码特征动态选择领域 Reviewer（默认）
+    #: 默认标记
     AUTO = "auto"
-    #: 四领域 Reviewer + 选择性 Critic + 独立 Verifier（PR / CI / 重要代码）
+    #: 初审后复核全部有效候选
     FULL = "full"
 
 
@@ -244,16 +244,93 @@ def _parse_line_range(value: Any) -> tuple[int, int]:
     return min(tokens), max(tokens)
 
 
+#: 模型自报的 evidence.kind 常见写法 → 契约枚举的映射。
+#: 不在这里做容错的话，模型写 ``"kind": "tool"`` 会让整条 issue 校验失败并被静默丢弃。
+_EVIDENCE_KIND_ALIASES = {
+    "tool": "tool_output",
+    "tool_call": "tool_output",
+    "tool_result": "tool_output",
+    "tool_output": "tool_output",
+    "static_analysis": "tool_output",
+    "observation": "tool_output",
+    "ast": "ast_node",
+    "ast_node": "ast_node",
+    "code": "code_snippet",
+    "snippet": "code_snippet",
+    "source": "code_snippet",
+    "code_snippet": "code_snippet",
+    "rule": "rule",
+    "lint": "rule",
+    "regex": "rule",
+    "convention": "rule",
+    "test": "test_result",
+    "test_result": "test_result",
+    "runtime": "test_result",
+}
+
+
 class Evidence(BaseModel):
     """问题证据：Agent 必须给出「凭什么这么判断」的可核验依据。"""
 
     model_config = ConfigDict(extra="ignore")
 
     kind: Literal["tool_output", "ast_node", "code_snippet", "rule", "test_result"] = "code_snippet"
+    evidence_id: str = Field(default="", description="对应本次请求中的证据记录 ID")
     tool: Optional[str] = Field(default=None, description="产出该证据的工具名")
     line: Optional[int] = Field(default=None, description="证据所在行号")
     snippet: str = Field(default="", description="代码片段或工具原始输出片段")
     detail: str = Field(default="", description="证据如何支撑该结论")
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _coerce_kind(cls, value: Any) -> str:
+        """把模型自由填写的证据类型归一到契约枚举，避免整条结论被丢弃。"""
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if not text:
+            return "code_snippet"
+        if text in _EVIDENCE_KIND_ALIASES:
+            return _EVIDENCE_KIND_ALIASES[text]
+        if "tool" in text or "static" in text:
+            return "tool_output"
+        if "ast" in text or "node" in text:
+            return "ast_node"
+        if "test" in text:
+            return "test_result"
+        if "rule" in text or "lint" in text:
+            return "rule"
+        return "code_snippet"
+
+    @field_validator("line", mode="before")
+    @classmethod
+    def _coerce_line(cls, value: Any) -> Optional[int]:
+        """兼容 ``"第 3 行"``、``"3-5"`` 这类行号写法。"""
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        match = re.search(r"\d+", text)
+        return int(match.group(0)) if match else None
+
+    @field_validator("evidence_id", "snippet", "detail", mode="before")
+    @classmethod
+    def _coerce_text(cls, value: Any) -> str:
+        """把模型偶发的对象/数组字段转成字符串，避免类型错误拖垮整条结论。"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    @field_validator("tool", mode="before")
+    @classmethod
+    def _coerce_tool(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     def is_verifiable(self) -> bool:
         """证据是否可用作核验（至少有工具来源或代码片段）。"""
@@ -277,12 +354,13 @@ class Issue(BaseModel):
     fix_suggestion: str = ""
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     evidence: List[Evidence] = Field(default_factory=list)
+    evidence_refs: List[str] = Field(default_factory=list)
     #: 由哪个 Agent 角色产出（多智能体场景下用于溯源）
     produced_by: str = "reviewer"
     #: 验证器给出的结论，None 表示未验证
     verified: Optional[bool] = None
     verify_note: str = ""
-    #: 多智能体场景下各角色结论冲突（例如 Critic 判误报但独立引擎佐证）
+    #: 多智能体场景下各角色结论存在冲突
     disagreement: bool = False
     #: 稳定的候选标识：合并、裁决与前端回传反馈都以它为锚点
     candidate_id: str = ""
@@ -332,6 +410,29 @@ class Issue(BaseModel):
             ).strip()
         if not data.get("fix_suggestion"):
             data["fix_suggestion"] = str(data.get("fix") or data.get("suggestion") or "").strip()
+
+        # 兼容模型把 evidence 写成字符串/对象而非数组的情况，避免整条结论校验失败被丢弃
+        evidence = data.get("evidence")
+        if isinstance(evidence, str):
+            text = evidence.strip()
+            data["evidence"] = [{"detail": text}] if text else []
+        elif isinstance(evidence, dict):
+            data["evidence"] = [evidence]
+        elif isinstance(evidence, list):
+            data["evidence"] = [
+                {"detail": item.strip()}
+                if isinstance(item, str) and item.strip()
+                else item
+                for item in evidence
+                if not isinstance(item, str) or item.strip()
+            ]
+        elif evidence is None:
+            data["evidence"] = []
+
+        refs = data.get("evidence_refs")
+        if isinstance(refs, str):
+            refs = refs.strip()
+            data["evidence_refs"] = [refs] if refs else []
         return data
 
     @field_validator("subtype")
@@ -412,6 +513,7 @@ class Issue(BaseModel):
             "adjudication": self.adjudication.value if self.adjudication else None,
             "adjudication_reason": self.adjudication_reason,
             "evidence": [e.model_dump() for e in self.evidence],
+            "evidence_refs": list(self.evidence_refs),
         }
 
 
@@ -432,7 +534,7 @@ class FindingCandidate(BaseModel):
     evidence_refs: List[str] = Field(default_factory=list)
     #: Reviewer 的自述理由（评审过程说明，不进入最终报告）
     notes: str = ""
-    #: 该候选在 Reviewer 原始输出中的序号，用于对齐 Critic 裁定
+    #: 该候选在 Reviewer 原始输出中的序号
     raw_index: int = 0
 
     def to_issue(self) -> Issue:
@@ -567,14 +669,14 @@ class DimensionCoverage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     dimension: str
-    status: Literal["completed", "timeout", "error", "skipped"] = "skipped"
+    status: Literal["completed", "timeout", "error", "skipped", "not_required"] = "skipped"
     detail: str = ""
     elapsed_ms: float = 0.0
     issues: int = 0
 
     @property
     def ok(self) -> bool:
-        return self.status == "completed"
+        return self.status in {"completed", "not_required"}
 
 
 class CoverageReport(BaseModel):
@@ -679,12 +781,15 @@ class ToolResult(BaseModel):
     error: str = ""
     duration_ms: float = 0.0
     from_cache: bool = False
+    error_type: str = ""
+    retryable: bool = False
+    attempts: int = 1
 
     def to_observation(self, max_chars: int = 4000) -> str:
         """转成喂给 LLM 的观察文本。"""
         text = self.content or ""
         if not self.ok:
-            text = f"[工具执行失败] {self.error or text}"
+            text = f"[工具执行失败] type={self.error_type or 'execution_error'} retryable={self.retryable} attempts={self.attempts}: {self.error or text}"
         if len(text) > max_chars:
             text = text[:max_chars] + f"\n... [输出被截断，原始长度 {len(text)} 字符]"
         return text

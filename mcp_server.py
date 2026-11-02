@@ -42,9 +42,14 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from agent.tools import build_optimizer_registry, build_registry, build_reviewer_registry
+from agent.tools import (
+    build_fix_agent_registry,
+    build_full_registry,
+    build_review_registry,
+    build_verification_registry,
+)
 from agent.tools.base import ToolRegistry
-from agent.tools.pipeline_tools import ReviewCodeTool
+from agent.adapters.mcp import ReviewWorkflowTool
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "code-review-agent"
@@ -66,14 +71,16 @@ def log(message: str) -> None:
 
 def build_tools(profile: str, codebase_root: Optional[str]) -> ToolRegistry:
     if profile == "review":
-        registry = build_reviewer_registry(codebase_root)
-    elif profile == "optimize":
-        registry = build_optimizer_registry(codebase_root)
+        registry = build_review_registry(codebase_root)
+    elif profile == "verify":
+        registry = build_verification_registry(codebase_root)
+    elif profile in {"fix", "optimize"}:
+        registry = build_fix_agent_registry(codebase_root)
     else:
-        registry = build_registry(codebase_root)
+        registry = build_full_registry(codebase_root)
     # 多 Agent 主线：把「完整审查」本身暴露成一个工具，供任意 MCP 客户端调用。
     if profile in ("review", "all"):
-        registry.register(ReviewCodeTool())
+        registry.register(ReviewWorkflowTool())
     return registry
 
 
@@ -247,9 +254,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="代码审查 Agent 的 MCP Server（stdio）")
     parser.add_argument(
         "--profile",
-        choices=["review", "optimize", "all"],
+        choices=["review", "verify", "fix", "optimize", "all"],
         default="all",
-        help="review=只读工具（推荐给编辑器集成）；optimize=含补丁与沙箱；all=全部",
+        help="review=发现；verify=核验；fix=候选生成与自测；optimize=fix 兼容别名；all=全部",
     )
     parser.add_argument("--codebase-root", default="", help="代码库根目录，启用检索类工具")
     parser.add_argument("--list", action="store_true", help="仅打印工具清单后退出（自检用）")

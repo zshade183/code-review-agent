@@ -752,7 +752,7 @@ class MemoryStore:
                     "【历史误报提示】以下形态在本项目曾被判定为误报，请谨慎复核后再报告：\n"
                     + "\n".join(lines)
                 )
-        return "\n\n".join(blocks)
+        return "\n\n".join(blocks)[:16000]
 
     def stats(self) -> Dict[str, Any]:
         self.ensure_loaded()
@@ -770,3 +770,16 @@ class MemoryStore:
             "short_term_sessions": len(self._sessions),
             "perceptions": len(self._perceptions),
         }
+
+
+_shared_memory: Optional[MemoryStore] = None
+_shared_memory_lock = threading.Lock()
+
+
+def get_shared_memory() -> MemoryStore:
+    """One bounded conversation store per server process."""
+    global _shared_memory
+    with _shared_memory_lock:
+        if _shared_memory is None:
+            _shared_memory = MemoryStore()
+        return _shared_memory

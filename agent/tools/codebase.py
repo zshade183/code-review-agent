@@ -325,6 +325,8 @@ class CodebaseIndex:
 
 
 class SearchCodebaseTool(Tool):
+    retry_safe = True
+    result_fields = {"results": list}
     name = "search_codebase"
     description = (
         "在项目代码库中检索与查询语义相关的代码块（函数/类/模块头），返回文件路径、行号范围"
@@ -363,6 +365,8 @@ class SearchCodebaseTool(Tool):
 
 
 class ReadFileTool(Tool):
+    retry_safe = True
+    result_fields = {"path": str, "line_start": int, "line_end": int, "content": str}
     name = "read_project_file"
     description = "读取项目内某个文件的指定行范围（带行号）。在检索结果不足、需要看完整实现时使用。"
     parameters = {
@@ -389,6 +393,8 @@ class ReadFileTool(Tool):
 
 
 class FindSymbolInProjectTool(Tool):
+    retry_safe = True
+    result_fields = {"definitions": list}
     name = "find_symbol_in_project"
     description = "在整个项目中查找某个函数/类的定义位置（文件 + 行号）。用于确认复用点与改动影响面。"
     parameters = {

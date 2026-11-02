@@ -103,6 +103,40 @@ def main() -> int:
         check("拿到结构化审查报告", bool(report), f"issues={len(issues)}")
         check("报告里至少有一条带证据的结论", bool(issues) and all(i.get("evidence") for i in issues))
         check("页面渲染出审查结果区", any("审查结果" in str(m.value) for m in app.markdown))
+        check("审查后可以追问", app.session_state["chat_ready"] and not app.chat_input[0].disabled)
+        session_id = app.session_state["chat_session_id"]
+        app.chat_input[0].set_value("请解释第一个问题").run()
+        check("追问页面无异常", not app.exception)
+        check("追问显示用户和助手消息", len(app.session_state["chat_messages"]) == 2)
+        app.chat_input[0].set_value("应该如何修复？").run()
+        check("第二轮复用同一会话", app.session_state["chat_session_id"] == session_id)
+        check("保留两轮消息", len(app.session_state["chat_messages"]) == 4)
+        next(b for b in app.button if b.key == "load_stats").click().run()
+        check("统计页面显示运行指标", not app.exception and any(m.label == "运行次数" for m in app.metric))
+        next(b for b in app.button if b.key == "load_memory").click().run()
+        check("会话记忆查询成功", not app.exception and bool(app.json))
+        next(t for t in app.text_input if t.key == "checkpoint_id").set_value(result["review_id"])
+        next(b for b in app.button if b.key == "load_checkpoint").click().run()
+        check("读取审查检查点", app.session_state["loaded_checkpoint"]["kind"] == "review")
+        next(b for b in app.button if b.key == "recover_plan").click().run()
+        check("检查点生成待确认计划", bool(app.session_state["recovered_plan"].get("fix_id")))
+        from unittest.mock import patch, Mock
+        failed = Mock(status_code=400)
+        failed.json.return_value = {"detail": "会话不存在或已过期"}
+        with patch("requests.post", return_value=failed):
+            app.chat_input[0].set_value("失败后重试的问题").run()
+        check("失败时显示错误", any("追问失败" in str(e.value) for e in app.error))
+        check("失败不写入虚假回答", len(app.session_state["chat_messages"]) == 4)
+        app.text_area[0].set_value("x = 2").run()
+        check("代码变化后提示重新审查", any("代码已变化" in str(w.value) for w in app.warning))
+        next(b for b in app.button if b.key == "clear_chat").click().run()
+        check("清除后禁止继续旧会话", not app.session_state["chat_ready"] and app.chat_input[0].disabled)
+        check("清除后生成新会话", app.session_state["chat_session_id"] != session_id)
+        check("清除后消息为空", not app.session_state["chat_messages"])
+        current_session = app.session_state["chat_session_id"]
+        next(t for t in app.sidebar.text_input if t.label == "项目标识").set_value("another-project").run()
+        check("切换项目隔离会话", app.session_state["chat_session_id"] != current_session and not app.session_state["chat_ready"])
+        check("切换项目清除旧报告", "review_result" not in app.session_state)
         return 0
     finally:
         server.should_exit = True

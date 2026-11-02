@@ -2,8 +2,8 @@
 
 审查与修复是**两条独立管线**：
 
-- 领域 Reviewer / Critic / Verifier 始终保持只读
-- 只有 Fix Agent 能获得补丁工具、代码执行工具与测试工具
+- 四个领域审查助手始终保持只读
+- Fix Agent 只能生成候选代码；Harness 独占最终补丁、验证与失败回退
 """
 
 from agent.fixing.agent import (
@@ -13,6 +13,7 @@ from agent.fixing.agent import (
     extract_code,
 )
 from agent.fixing.verification import verify_optimization
+from agent.fixing.harness import FixHarness, HarnessDecision
 
 __all__ = [
     "OPTIMIZER_SYSTEM_PROMPT",
@@ -20,4 +21,6 @@ __all__ = [
     "build_optimizer_prompt",
     "extract_code",
     "verify_optimization",
+    "FixHarness",
+    "HarnessDecision",
 ]

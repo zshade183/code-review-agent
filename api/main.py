@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 import agent.settings as agent_settings
 from agent.llm import LLMClient
-from agent.memory import MemoryStore
+from agent.memory import MemoryStore, get_shared_memory
 from agent.pipelines import FixPipeline, ReviewPipeline
 from agent.schema import normalize_strategy
 from agent.trace import TraceStore, iter_run_lines
@@ -103,7 +103,7 @@ _workflow_store: Optional[WorkflowStore] = None
 def _get_memory() -> MemoryStore:
     global _memory_store
     if _memory_store is None:
-        _memory_store = MemoryStore()
+        _memory_store = get_shared_memory()
     return _memory_store
 
 
@@ -123,11 +123,9 @@ def _get_pipeline(
         pipeline = _agent_cache.get(key)
         if pipeline is None:
             pipeline = ReviewPipeline(
-                client=LLMClient(),
                 codebase_root=codebase_root,
-                persist_traces=False,
-                memory=_get_memory() if use_memory else None,
                 project=project,
+                use_memory=use_memory,
             )
             _agent_cache[key] = pipeline
         return pipeline
@@ -159,7 +157,7 @@ class ReviewRequest(BaseModel):
     use_memory: bool = Field(default=True, description="是否启用长期记忆（裁决后降权，不删除）")
     strategy: str = Field(
         default="",
-        description="审查策略：fast=单 Agent；auto=按证据选择领域（默认）；full=四领域+Critic+Verifier",
+        description="审查档位：fast 仅初审；auto 风险候选复核；full 全候选复核",
     )
     mode: str = Field(
         default="",
@@ -167,6 +165,25 @@ class ReviewRequest(BaseModel):
     )
     project: str = Field(default="default", description="项目标识，用于记忆隔离")
     session_id: str = Field(default="", description="可选会话标识，用于串联有界短期记忆")
+    extra_context: str = Field(default="", max_length=6000, description="本轮审查要求或补充上下文")
+
+
+class FollowUpRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=6000)
+    project: str = "default"
+
+
+@app.post("/agent/followup")
+def agent_followup(request: FollowUpRequest) -> Dict[str, Any]:
+    """回答同一会话中对已有审查的追问；不执行代码修改。"""
+    try:
+        return _get_pipeline(None, project=request.project).follow_up(request.question, request.session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("追问失败：%s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="追问模型调用失败，请稍后重试") from exc
 
 
 class OptimizeRequest(BaseModel):
@@ -335,12 +352,12 @@ def agent_review(request: ReviewRequest) -> Dict[str, Any]:
             file_path=request.file_path or "",
             strategy=strategy,
             session_id=request.session_id,
+            extra_context=request.extra_context,
         )
         payload = result.to_dict(include_traces=True)
         # 向后兼容：旧客户端读 mode / trace
         payload["mode"] = _legacy_mode(result.strategy.value)
-        if result.strategy.value == "fast":
-            payload["trace"] = next(iter(result.runs.values())).to_trace_dict() if result.runs else {}
+        payload["trace"] = {"engine": "langgraph", "events": result.events}
         review_id = _get_workflows().save(
             "review",
             request.code,
@@ -386,6 +403,7 @@ def agent_review_stream(request: ReviewRequest) -> StreamingResponse:
                     strategy=strategy,
                     on_event=on_event,
                     session_id=request.session_id,
+                    extra_context=request.extra_context,
                 )
                 payload = result.to_dict(include_traces=True)
                 payload["mode"] = _legacy_mode(result.strategy.value)
@@ -409,16 +427,8 @@ def agent_review_stream(request: ReviewRequest) -> StreamingResponse:
                 if item is None:
                     break
                 role, step = item
-                payload = {
-                    "role": role,
-                    "index": step.index,
-                    "kind": step.kind,
-                    "brief": step.brief(600),
-                    "latency_ms": round(step.latency_ms, 2),
-                    "tokens": step.usage.total_tokens,
-                    "tool": step.tool_call.name if step.tool_call else None,
-                    "ok": step.tool_result.ok if step.tool_result else None,
-                }
+                event = step if isinstance(step, dict) else {"detail": str(step)}
+                payload = {"role": role, **event}
                 yield _sse("step", payload)
         finally:
             thread.join(timeout=1.0)
@@ -447,6 +457,11 @@ def _fix_payload(
     if request.fix_id and (checkpoint is None or checkpoint["kind"] != "fix"):
         raise HTTPException(status_code=404, detail="修复计划不存在")
     if checkpoint is not None:
+        if request.code.strip() and request.code != checkpoint["code"]:
+            raise HTTPException(
+                status_code=409,
+                detail="待修复代码已变化，旧修复计划不能直接执行；请重新审查并生成计划",
+            )
         if checkpoint["status"] == "completed" and confirm:
             execution = checkpoint["payload"].get("execution")
             if isinstance(execution, dict):
@@ -461,6 +476,11 @@ def _fix_payload(
         review_checkpoint = workflows.get(review_id)
         if review_checkpoint is None or review_checkpoint["kind"] != "review":
             raise HTTPException(status_code=404, detail="审查快照不存在")
+        if code.strip() and code != review_checkpoint["code"]:
+            raise HTTPException(
+                status_code=409,
+                detail="待修复代码与审查快照不一致；请重新审查",
+            )
         code = code or review_checkpoint["code"]
         review_payload = review_checkpoint["payload"]
         report = review_payload.get("report") or {}

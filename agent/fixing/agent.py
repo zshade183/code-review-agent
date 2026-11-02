@@ -18,17 +18,18 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from agent.llm import LLMClient
-from agent.runtime import AgentConfig, AgentRuntime, RunOutcome
+from agent.agents import FIX_AGENT_CONFIG
+from agent.executors import ExecutionLimits, ToolCallingExecutor
+from agent.runtime import AgentConfig, RunOutcome
 from agent.schema import (
     Issue,
     OptimizationResult,
     ReviewReport,
     VerificationReport,
 )
-from agent.tools import build_optimizer_registry
+from agent.tools import build_fix_agent_registry, build_harness_registry
 from agent.tools.base import ToolRegistry
-from agent.tools.patch import make_unified_diff, patch_stats
-from agent.fixing.verification import verify_optimization
+from agent.fixing.harness import FixHarness
 from agent.trace import TraceRecorder
 
 logger = logging.getLogger(__name__)
@@ -144,13 +145,22 @@ class OptimizerAgent:
         max_verify_retries: int = 2,
         fallback_to_original: bool = True,
         enforce_signature: bool = True,
+        harness: Optional[FixHarness] = None,
     ) -> None:
         self.client = client or LLMClient()
-        self.registry = registry or build_optimizer_registry(codebase_root)
+        if registry is None:
+            self.registry = build_fix_agent_registry(codebase_root)
+        else:
+            allowed = [name for name in FIX_AGENT_CONFIG.tool_names if name in registry]
+            self.registry = registry.subset(allowed)
         self.config = config or AgentConfig()
         self.max_verify_retries = max_verify_retries
-        self.fallback_to_original = fallback_to_original
-        self.enforce_signature = enforce_signature
+        harness_registry = registry if registry is not None else build_harness_registry(codebase_root)
+        self.harness = harness or FixHarness(
+            harness_registry,
+            enforce_signature=enforce_signature,
+            fallback_to_original=fallback_to_original,
+        )
 
     # ------------------------------------------------------------------
     # 验证管线（harness 侧强制执行）
@@ -164,14 +174,9 @@ class OptimizerAgent:
         timeout: float = 10.0,
     ) -> VerificationReport:
         """执行三级验证（实现见 ``agent/fixing/verification.py``）。"""
-        return verify_optimization(
-            original_code,
-            optimized_code,
-            registry=self.registry,
-            test_code=test_code,
-            timeout=timeout,
-            enforce_signature=self.enforce_signature,
-        )
+        return self.harness.validate(
+            original_code, optimized_code, test_code=test_code, timeout=timeout
+        ).verification
 
     # ------------------------------------------------------------------
     # 主流程
@@ -187,7 +192,6 @@ class OptimizerAgent:
     ) -> Tuple[OptimizationResult, RunOutcome]:
         cfg = config or self.config
         recorder = trace or TraceRecorder(task="optimize")
-        runtime = AgentRuntime(self.client, self.registry, cfg, recorder)
 
         report = _coerce_report(review)
         issues_text = _format_issues(report)
@@ -204,29 +208,39 @@ class OptimizerAgent:
                     "并使用 ```python 围栏包裹。"
                 )
 
-            verification = self.verify(code, candidate, test_code=test_code)
-            if verification.passed or attempts > self.max_verify_retries:
-                return self._finalize(code, candidate, verification, attempts, report), ""
+            decision = self.harness.validate(code, candidate, test_code=test_code)
+            if decision.accepted or attempts > self.max_verify_retries:
+                return self.harness.deliver(
+                    code, candidate, decision, attempts=attempts, report=report
+                ), ""
+            return None, decision.feedback
 
-            # 验证未通过 -> 把失败信息反馈给模型，让它带着错误重试
-            failures = [
-                f"- {check.name}: {check.detail}" for check in verification.checks if not check.passed
-            ]
-            return None, (
-                "你给出的修复代码未通过验证，请修正后重新输出完整代码：\n"
-                + "\n".join(failures)
-                + "\n\n注意：\n"
-                "1. 必须保持原有函数名与参数列表不变（除非问题本身要求改）\n"
-                "2. 修复后代码必须能通过上述全部检查\n"
-                "3. 只输出 ```python 代码块，不要输出解释"
-            )
-
-        outcome = runtime.run(
-            build_optimizer_prompt(code, issues_text, test_code),
-            system_prompt=OPTIMIZER_SYSTEM_PROMPT,
-            finalizer=finalizer,
-            task="optimize",
+        limits = ExecutionLimits(
+            max_steps=cfg.max_steps,
+            max_tool_calls=cfg.max_tool_calls,
+            max_total_tokens=cfg.max_total_tokens,
+            max_wall_clock_s=cfg.max_wall_clock_s,
+            repeat_action_limit=cfg.repeat_action_limit,
+            finalizer_retry_limit=max(cfg.structured_retry_limit, self.max_verify_retries),
+            temperature=cfg.temperature,
+            observation_max_chars=cfg.observation_max_chars,
+            tool_choice=cfg.tool_choice,
         )
+        execution = ToolCallingExecutor(
+            self.client,
+            self.registry,
+            FIX_AGENT_CONFIG,
+            limits=limits,
+            trace=recorder,
+        ).run(
+            code,
+            OPTIMIZER_SYSTEM_PROMPT,
+            build_optimizer_prompt(code, issues_text, test_code),
+            finalizer=finalizer,
+        )
+        run = recorder.build(output={"text": execution.content})
+        run.usage = execution.usage
+        outcome = RunOutcome(run=run, value=execution.value, text=execution.content)
 
         result = outcome.value if isinstance(outcome.value, OptimizationResult) else None
         if result is None:
@@ -242,58 +256,6 @@ class OptimizerAgent:
                 used_fallback=True,
             )
         return result, outcome
-
-    # ------------------------------------------------------------------
-
-    def _finalize(
-        self,
-        original: str,
-        candidate: str,
-        verification: VerificationReport,
-        attempts: int,
-        report: ReviewReport,
-    ) -> OptimizationResult:
-        patch = make_unified_diff(original, candidate, "snippet.py")
-        stats = patch_stats(patch, max(1, len(original.split("\n"))))
-        changed = original.strip() != candidate.strip()
-
-        if verification.passed:
-            final_code = candidate
-            used_fallback = False
-            summary = (
-                f"修复完成，通过全部验证（{len(verification.checks)} 项）；"
-                f"改动 +{stats.added}/-{stats.removed} 行"
-            )
-        elif self.fallback_to_original:
-            final_code = original
-            used_fallback = True
-            summary = (
-                "修复代码未通过验证（"
-                + "、".join(verification.failed_names)
-                + "），已回退保留原代码以避免引入新缺陷。"
-            )
-        else:
-            final_code = candidate
-            used_fallback = True
-            summary = "修复代码未通过验证（" + "、".join(verification.failed_names) + "），按配置仍然返回。"
-
-        if stats.change_ratio > 0.6:
-            summary += "；注意改动比例较高，建议人工复核是否超出最小修改范围。"
-
-        return OptimizationResult(
-            original_code=original,
-            optimized_code=final_code,
-            patch=patch if final_code == candidate else "",
-            changed=changed and final_code == candidate,
-            change_ratio=round(stats.change_ratio, 4),
-            verification=verification,
-            attempts=attempts,
-            summary=summary,
-            addressed_issues=[f"{i.category.value}/{i.subtype}@行{i.line_start}" for i in report.issues],
-            api_ok=True,
-            used_fallback=used_fallback,
-        )
-
 
 def _coerce_report(review: ReviewReport | Dict[str, Any] | None) -> ReviewReport:
     if review is None:

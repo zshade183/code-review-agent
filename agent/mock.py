@@ -176,10 +176,6 @@ def mock_chat(
     code = _extract_code(messages)
     category_filter = _prompt_review_category(messages)
 
-    # Critic 角色：直接产出裁定（无需调工具）
-    if "待评审的问题清单" in prompt_text:
-        return _mock_critic(prompt_text)
-
     # 优化任务：走「先验证 -> 再交付代码」的轨迹
     if "create_patch" in tool_names or "run_tests" in tool_names:
         return _mock_optimize(prompt_text, code, tool_names, observed)
@@ -219,20 +215,6 @@ def mock_chat(
         model="mock",
         finish_reason="stop",
     )
-
-
-def _mock_critic(prompt_text: str) -> LLMResponse:
-    """Critic 角色的模拟输出：对清单中每条问题给出 keep 裁定。
-
-    mock 不具备真实判断力，因此一律 keep（保守保留），用于验证编排与合并逻辑。
-    """
-    indices = [int(m.group(1)) for m in re.finditer(r"^\[(\d+)\]", prompt_text, re.M)]
-    verdicts = [
-        {"index": index, "verdict": "keep", "reason": "[mock] 无可质疑点", "confidence": 0.5}
-        for index in indices
-    ]
-    content = json.dumps({"verdicts": verdicts, "overall_comment": "[mock] 全部保留"}, ensure_ascii=False)
-    return LLMResponse(content=content, usage=_usage(prompt_text, content), model="mock", finish_reason="stop")
 
 
 def _mock_optimize(

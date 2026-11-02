@@ -18,6 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import uuid
+from datetime import datetime
+from urllib.parse import quote, urlencode
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -141,10 +144,10 @@ st.markdown(
     """
 <div class="app-hero">
   <h1>🧠 智能<span class="accent">代码审查</span> Agent</h1>
-  <p>确定性编排的多 Agent 协作：共享证据 · 领域专家并行 · 独立验证 · 规则裁决 · 人工确认后修复</p>
-  <span class="pill">Evidence Collector</span>
-  <span class="pill">四领域 Reviewer</span>
-  <span class="pill">Critic / Verifier 并行</span>
+  <p>确定性编排的 Agent 协作：综合审查 · 独立复核 · 证据追踪 · 规则裁决 · 人工确认后修复</p>
+  <span class="pill">Review Agent</span>
+  <span class="pill">Verification Agent</span>
+  <span class="pill">LangGraph 状态汇合</span>
   <span class="pill">确定性裁决</span>
   <span class="pill">Review / Fix 分离</span>
 </div>
@@ -158,10 +161,15 @@ st.markdown(
 # ---------------------------------------------------------------------------
 
 
+def api_headers() -> Dict[str, str]:
+    key = st.session_state.get("service_api_key", "")
+    return {"x-api-key": key} if key else {}
+
+
 def api_get(host: str, path: str, timeout: int = 3) -> Tuple[Optional[Dict[str, Any]], str]:
     """GET 请求；返回 (数据, 错误信息)。错误信息为空表示成功。"""
     try:
-        response = requests.get(f"{host}{path}", timeout=timeout)
+        response = requests.get(f"{host}{path}", timeout=timeout, headers=api_headers())
         response.raise_for_status()
         return response.json(), ""
     except requests.exceptions.RequestException as exc:
@@ -173,7 +181,7 @@ def api_get(host: str, path: str, timeout: int = 3) -> Tuple[Optional[Dict[str, 
 def api_post(host: str, path: str, payload: Dict[str, Any], timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Dict[str, Any]], str]:
     """POST JSON 请求；返回 (数据, 错误信息)。"""
     try:
-        response = requests.post(f"{host}{path}", json=payload, timeout=timeout)
+        response = requests.post(f"{host}{path}", json=payload, timeout=timeout, headers=api_headers())
         if response.status_code >= 400:
             detail = ""
             try:
@@ -190,7 +198,7 @@ def api_post(host: str, path: str, payload: Dict[str, Any], timeout: int = REQUE
 
 def iter_sse(host: str, path: str, payload: Dict[str, Any]) -> Iterator[Tuple[str, Dict[str, Any]]]:
     """消费 SSE 流，逐个产出 (事件名, 数据)。"""
-    with requests.post(f"{host}{path}", json=payload, stream=True, timeout=STREAM_TIMEOUT) as response:
+    with requests.post(f"{host}{path}", json=payload, stream=True, timeout=STREAM_TIMEOUT, headers=api_headers()) as response:
         if response.status_code >= 400:
             raise RuntimeError(f"HTTP {response.status_code}：{response.text[:200]}")
         event = "message"
@@ -216,6 +224,7 @@ def iter_sse(host: str, path: str, payload: Dict[str, Any]) -> Iterator[Tuple[st
 with st.sidebar:
     st.header("⚙️ 运行配置")
     api_host = st.text_input("API 服务地址", value="http://127.0.0.1:8000").rstrip("/")
+    st.text_input("服务 API Key（可选）", type="password", key="service_api_key")
 
     status, status_error = api_get(api_host, "/")
     if status_error:
@@ -231,34 +240,54 @@ with st.sidebar:
     st.markdown("---")
     strategy_label = st.radio(
         "审查策略",
-        ["auto（按证据选择领域，推荐）", "fast（单 Agent，最快）", "full（四领域 + 复核）"],
-        help="多 Agent 是默认能力，但不必每次请求都无条件调用全部角色："
-             "fast 适合编辑器实时检查，auto 是默认策略，full 用于 PR / CI / 重要代码。",
+        ["auto（风险候选复核，推荐）", "fast（仅初审，最快）", "full（全部候选复核）"],
+        help="fast 适合编辑器实时检查，auto 只复核风险候选，full 用于 PR / CI / 重要代码。",
     )
     strategy = {
-        "auto（按证据选择领域，推荐）": "auto",
-        "fast（单 Agent，最快）": "fast",
-        "full（四领域 + 复核）": "full",
+        "auto（风险候选复核，推荐）": "auto",
+        "fast（仅初审，最快）": "fast",
+        "full（全部候选复核）": "full",
     }[strategy_label]
     use_memory = st.toggle(
-        "启用长期记忆信号", value=True,
-        help="历史误报只在裁决后降低置信度并单独分组，不会在独立验证前删除候选",
+        "启用会话与长期记忆", value=True,
+        help="保存审查会话以支持连续追问，同时参考项目约定与历史误报",
     )
     project = st.text_input("项目标识", value="default", help="用于隔离不同项目的记忆")
     stream_steps = st.toggle("实时显示 Agent 步骤", value=True, help="通过 SSE 边跑边看各角色工具调用")
+    with st.expander("项目检索与审查要求"):
+        codebase_root = st.text_input("后端代码库目录", help="填写后端机器上可访问的目录，启用跨文件检索")
+        file_path = st.text_input("当前文件路径", value="snippet.py")
+        extra_context = st.text_area("本轮审查要求", max_chars=6000, placeholder="例如：重点关注 SQL 输入来源")
 
     with st.expander("使用说明"):
         st.markdown(
             "1. 粘贴代码或上传 .py 文件\n"
             "2. 在「代码审查」「代码修复」两个标签页分别提交\n"
             "3. 审查结果里每条结论都能展开看证据、也能标为误报"
+            "\n4. 审查完成后，在「连续追问」中讨论问题和修复建议"
         )
 
 # ---------------------------------------------------------------------------
 # 输入区
 # ---------------------------------------------------------------------------
 
-code = ""
+scope = (api_host, project)
+if st.session_state.get("chat_scope") != scope:
+    for key in ("review_result", "fix_plan", "fix_result", "chat_messages", "chat_ready", "reviewed_code", "chat_error", "loaded_checkpoint", "recovered_plan"):
+        st.session_state.pop(key, None)
+    st.session_state["chat_scope"] = scope
+    st.session_state["chat_session_id"] = str(uuid.uuid4())
+st.session_state.setdefault("chat_messages", [])
+st.session_state.setdefault("chat_ready", False)
+
+# 其它标签页（例如修复结果）请求回填代码时，必须在控件创建前写入 session_state
+pending_code = st.session_state.pop("pending_code", None)
+if pending_code is not None:
+    st.session_state["input_mode"] = "直接输入"
+    st.session_state["code"] = pending_code
+
+st.session_state.setdefault("input_mode", "直接输入")
+
 with st.container(border=True):
     st.markdown("#### 📂 待处理代码")
     input_type = st.radio(
@@ -266,27 +295,46 @@ with st.container(border=True):
         ["直接输入", "上传文件(.py)"],
         horizontal=True,
         label_visibility="collapsed",
+        key="input_mode",
     )
 
+    code = st.session_state.get("code", "")
     if input_type == "直接输入":
-        code = st.text_area(
+        # 不使用 key，保证切换输入方式后仍能从 session_state["code"] 回填
+        typed = st.text_area(
             "代码内容",
+            value=code,
             height=280,
             placeholder="def calculate(a, b):\n    return a + b * 10  # 存在魔法数字问题",
             label_visibility="collapsed",
         )
+        if typed != code:
+            st.session_state["code"] = typed
+            code = typed
     else:
-        uploaded_file = st.file_uploader("上传 Python 代码文件", type=["py"])
+        uploaded_file = st.file_uploader("上传 Python 代码文件", type=["py"], key="code_upload")
         if uploaded_file is not None:
-            try:
-                code = uploaded_file.read().decode(ENCODING, errors="replace")
-                st.success(f"文件读取成功：{uploaded_file.name}（{len(code.splitlines())} 行）")
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"文件读取失败：{exc}")
-                logger.error("文件上传失败: %s", exc)
+            file_tag = f"{uploaded_file.name}:{uploaded_file.size}"
+            if st.session_state.get("code_upload_tag") != file_tag:
+                try:
+                    loaded = uploaded_file.read().decode(ENCODING, errors="replace")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"文件读取失败：{exc}")
+                    logger.error("文件上传失败: %s", exc)
+                else:
+                    st.session_state["code"] = loaded
+                    st.session_state["code_upload_tag"] = file_tag
+                    code = loaded
+            if st.session_state.get("code_upload_tag") == file_tag:
+                st.success(
+                    f"文件读取成功：{uploaded_file.name}（{len(code.splitlines())} 行），"
+                    "可切回「直接输入」继续编辑"
+                )
 
     if code.strip():
-        st.session_state["code"] = code
+        st.caption(f"当前待处理代码：{len(code.splitlines())} 行 · {len(code)} 字符")
+    else:
+        st.caption("尚未输入代码：可直接粘贴，或切换到「上传文件」选择 .py 文件。")
 
 # ---------------------------------------------------------------------------
 # 结果渲染
@@ -338,6 +386,8 @@ def render_trace(trace: Dict[str, Any]) -> None:
     if not trace:
         return
     with st.expander("🔎 运行轨迹（Agent 每一步）"):
+        if trace.get("run_id"):
+            st.caption(f"运行 ID：{trace['run_id']}（可在“运行统计 → 查询运行轨迹”中按 ID 查看）")
         st.caption(
             f"stop_reason={trace.get('stop_reason')}｜步数={trace.get('steps')}｜"
             f"tokens={trace.get('usage', {}).get('total_tokens')}｜"
@@ -351,6 +401,38 @@ def render_trace(trace: Dict[str, Any]) -> None:
                 width="stretch",
                 hide_index=True,
             )
+
+
+def render_agent_traces(traces: List[Dict[str, Any]]) -> None:
+    """渲染审查图里各角色的轨迹（stats.agent_traces）。"""
+    if not traces:
+        st.info("本次运行没有采集到角色轨迹。")
+        return
+    for trace in traces:
+        tool_calls = trace.get("tool_calls") or []
+        st.markdown(
+            f"**{trace.get('agent') or 'agent'}** · 步数 {trace.get('steps')} · "
+            f"停止原因 `{trace.get('stop_reason') or '—'}` · 工具调用 {len(tool_calls)} 次"
+        )
+        if not tool_calls:
+            st.caption("该角色没有调用工具。")
+            continue
+        st.dataframe(
+            [
+                {
+                    "步骤": call.get("step"),
+                    "工具": call.get("tool"),
+                    "参数": json.dumps(call.get("arguments") or {}, ensure_ascii=False)[:200],
+                    "结果": "成功" if call.get("ok") else f"失败（{call.get('error_type') or '未知'}）",
+                    "重试": call.get("attempts") or 0,
+                    "缓存": "命中" if call.get("from_cache") else "—",
+                    "耗时(ms)": round(float(call.get("duration_ms") or 0), 1),
+                }
+                for call in tool_calls
+            ],
+            width="stretch",
+            hide_index=True,
+        )
 
 
 def render_report(report: Dict[str, Any], host: str, project: str, code: str) -> None:
@@ -443,6 +525,14 @@ def render_report(report: Dict[str, Any], host: str, project: str, code: str) ->
                     st.error(f"反馈失败：{error}")
                 else:
                     st.success(f"已记录（{data.get('record_id')}），下次审查会压制同类形态")
+            if st.button("确认问题有效", key=f"accept_{idx}_{issue.get('line_number')}"):
+                data, error = api_post(host, "/agent/feedback", {
+                    "code": code, "project": project, "accepted": True, "issue": issue, "note": "前端确认问题有效",
+                }, timeout=30)
+                if error:
+                    st.error(f"反馈失败：{error}")
+                else:
+                    st.success("已保存有效问题反馈")
 
 
 def render_verification(result: Dict[str, Any]) -> None:
@@ -461,14 +551,14 @@ def render_verification(result: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 st.markdown("---")
-tab_review, tab_fix = st.tabs(["🔍 代码审查", "🛠️ 代码修复"])
+tab_review, tab_fix, tab_chat, tab_manage = st.tabs(["🔍 代码审查", "🛠️ 代码修复", "💬 连续追问", "📊 运行与记忆"])
 
 with tab_review:
     left, right = st.columns([1, 4])
     trigger = left.button("开始审查", type="primary", width="stretch")
     right.caption(
-        "确定性编排：Evidence Collector → 领域 Reviewer 并行 → Candidate Merger → "
-        "Critic / Verifier 并行 → 规则裁决 → 记忆调整。"
+        "确定性编排：基础上下文 → Review Agent → 候选校验 → "
+        "条件式 Verification Agent → 规则裁决。"
     )
 
     if trigger:
@@ -480,6 +570,10 @@ with tab_review:
                 "strategy": strategy,
                 "use_memory": use_memory,
                 "project": project,
+                "session_id": st.session_state["chat_session_id"],
+                "file_path": file_path,
+                "codebase_root": codebase_root or None,
+                "extra_context": extra_context,
             }
             logger.info("用户触发审查：strategy=%s stream=%s", strategy, stream_steps)
             result: Optional[Dict[str, Any]] = None
@@ -487,18 +581,31 @@ with tab_review:
                 with st.status("Agent 正在工作…", expanded=True) as status_box:
                     steps: List[Dict[str, Any]] = []
                     placeholder = st.empty()
+                    stream_meta: Dict[str, Any] = {}
                     try:
                         for event, data in iter_sse(api_host, "/agent/review/stream", payload):
-                            if event == "step":
+                            if event == "start":
+                                stream_meta.update(data or {})
+                                mode_hint = "（MOCK 模式）" if stream_meta.get("mock_mode") else ""
+                                status_box.update(
+                                    label=f"Agent 正在工作…策略 {stream_meta.get('strategy') or strategy}{mode_hint}",
+                                    state="running",
+                                    expanded=True,
+                                )
+                            elif event == "step":
                                 steps.append(data)
                                 placeholder.markdown(render_steps(steps))
                             elif event == "result":
                                 result = data
                             elif event == "error":
                                 raise RuntimeError(data.get("message") or "后端返回错误")
+                            elif event == "end" and not data.get("ok"):
+                                raise RuntimeError("后端流式执行未成功完成")
                         status_box.update(
                             label=f"完成（{len(steps)} 步）", state="complete", expanded=False
                         )
+                        if not result:
+                            st.warning("流式响应已结束，但没有收到完整结果；可关闭「实时显示 Agent 步骤」后重试。")
                     except Exception as exc:  # noqa: BLE001 - 前端需要把任何失败展示出来
                         status_box.update(label="执行失败", state="error")
                         st.error(str(exc))
@@ -510,16 +617,22 @@ with tab_review:
                     st.error(f"审查失败：{error}")
                     logger.error("审查失败: %s", error)
             st.session_state["review_result"] = result
+            st.session_state["chat_ready"] = bool(result and use_memory)
+            if result:
+                st.session_state["reviewed_code"] = code
+                st.session_state["chat_messages"] = []
+                st.session_state.pop("chat_error", None)
+                st.session_state.pop("fix_plan", None)
+                st.session_state.pop("fix_result", None)
 
     review_result = st.session_state.get("review_result")
     if review_result:
         st.markdown("### 📝 审查结果")
         stats = review_result.get("stats") or {}
         coverage = review_result.get("coverage") or {}
-        plan_info = review_result.get("plan") or {}
         st.markdown(
             f"**策略**：`{review_result.get('strategy')}` ｜ "
-            f"**领域**：{('、'.join(plan_info.get('reviewer_roles') or []) or '单 Agent')} ｜ "
+            f"**角色**：{('、'.join(stats.get('selected_roles') or []) or 'review')} ｜ "
             f"**部分成功**：{coverage.get('partial')}"
         )
         if coverage.get("incomplete"):
@@ -532,18 +645,49 @@ with tab_review:
              ("记忆存疑", "memory_suspected"), ("已驳回", "rejected")],
         ):
             column.metric(label, adjudication.get(key, 0))
-        render_report(review_result.get("report") or {}, api_host, project, code)
-        with st.expander("🔎 各角色轨迹"):
+        if review_result.get("review_id") or review_result.get("run_id"):
             st.caption(
-                f"tokens={stats.get('tokens')}｜耗时={round((stats.get('elapsed_ms') or 0) / 1000, 2)}s｜"
-                f"critic={json.dumps(stats.get('critic') or {}, ensure_ascii=False)}"
+                f"审查快照 ID：{review_result.get('review_id') or '—'} ｜ "
+                f"运行轨迹 ID：{review_result.get('run_id') or '—'}"
             )
-            for role, trace in (review_result.get("traces") or {}).items():
-                st.markdown(
-                    f"- `{role}` stop={trace.get('stop_reason')} steps={trace.get('steps')} "
-                    f"tokens={trace.get('usage', {}).get('total_tokens')} "
-                    f"tools={json.dumps(trace.get('tool_calls') or {}, ensure_ascii=False)}"
+        render_report(review_result.get("report") or {}, api_host, project, st.session_state.get("reviewed_code", code))
+        if not ((review_result.get("report") or {}).get("issues") or []):
+            # 候选可能因字段校验失败被后端丢弃，把原因直接露出来，避免只看到“0 条问题”
+            review_detail = str(((coverage.get("dimensions") or {}).get("review") or {}).get("detail") or "")
+            st.warning(
+                "本次审查没有留下问题。"
+                + (f"审查阶段说明：{review_detail}" if review_detail else "可补充上下文，或换用 full 策略后重试。")
+            )
+        with st.expander("🔎 各角色轨迹"):
+            render_agent_traces(stats.get("agent_traces") or [])
+        dimensions = coverage.get("dimensions") or {}
+        with st.expander("📋 审查覆盖度"):
+            if dimensions:
+                st.dataframe(
+                    [
+                        {
+                            "维度/角色": name,
+                            "状态": item.get("status"),
+                            "问题数": item.get("issues"),
+                            "耗时(ms)": round(float(item.get("elapsed_ms") or 0), 1),
+                            "说明": item.get("detail"),
+                        }
+                        for name, item in dimensions.items()
+                    ],
+                    width="stretch",
+                    hide_index=True,
                 )
+            else:
+                st.caption("后端未返回维度覆盖信息。")
+            if review_result.get("reviewed_dimensions"):
+                st.caption("已审查维度：" + "、".join(review_result["reviewed_dimensions"]))
+        with st.expander("🧾 完整阶段事件"):
+            st.json(review_result.get("events") or [])
+        evidence_count = stats.get("evidence_records")
+        st.caption(
+            f"耗时 {round((review_result.get('elapsed_ms') or 0) / 1000, 2)}s"
+            + (f" ｜ 证据记录 {evidence_count} 条" if evidence_count is not None else "")
+        )
         st.download_button(
             "📥 下载审查报告(JSON)",
             data=json.dumps(review_result, ensure_ascii=False, indent=2),
@@ -557,7 +701,60 @@ with tab_review:
             unsafe_allow_html=True,
         )
 
+with tab_chat:
+    st.markdown("### 💬 围绕审查结果继续讨论")
+    st.caption("可以询问问题原因、风险和修复思路。执行代码修改请使用「代码修复」。")
+    if not use_memory:
+        st.info("请启用侧边栏的「会话与长期记忆」，然后重新审查代码。")
+    elif not st.session_state["chat_ready"]:
+        st.info("先完成一次代码审查，即可在这里连续追问。服务重启或清除会话后，请重新审查。")
+    if st.session_state.get("reviewed_code") and code != st.session_state["reviewed_code"]:
+        st.warning("编辑区代码已变化。当前对话仍基于上次审查的代码；请重新审查以讨论新版本。")
+    messages = st.session_state["chat_messages"]
+    if not messages and st.session_state["chat_ready"]:
+        st.markdown("你可以问：**哪个问题最值得优先修复？** 或 **这个问题为什么会发生？**")
+    for message in messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    if st.session_state.get("chat_error"):
+        st.error(st.session_state["chat_error"])
+    question = st.chat_input("输入追问，例如：请解释第一个问题，并给出修复建议", max_chars=6000,
+                             disabled=not (use_memory and st.session_state["chat_ready"]))
+    if question:
+        with st.spinner("正在结合审查结果回答…"):
+            reply, error = api_post(api_host, "/agent/followup", {
+                "project": project, "session_id": st.session_state["chat_session_id"], "question": question,
+            })
+        answer = reply.get("answer") if isinstance(reply, dict) else None
+        if error or not isinstance(answer, str) or not answer.strip():
+            st.session_state["chat_error"] = f"追问失败：{error or '后端未返回有效回答'}。可重新提交问题；会话过期时请重新审查。"
+            st.error(st.session_state["chat_error"])
+            with st.expander("复制刚才的问题后重试", expanded=True):
+                st.code(question, language=None)
+        else:
+            messages.extend([{"role": "user", "content": question}, {"role": "assistant", "content": answer}])
+            st.session_state["chat_messages"] = messages[-40:]
+            st.session_state.pop("chat_error", None)
+            st.rerun()
+    st.caption("会话保存在当前后端进程；服务重启后不会保留。")
+    if st.button("清除对话并开始新会话", key="clear_chat"):
+        try:
+            response = requests.delete(f"{api_host}/agent/memory/session/{st.session_state['chat_session_id']}",
+                                       params={"project": project}, timeout=10, headers=api_headers())
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            st.error(f"清除失败，原会话仍保留：{exc}")
+        else:
+            st.session_state["chat_session_id"] = str(uuid.uuid4())
+            st.session_state["chat_messages"] = []
+            st.session_state["chat_ready"] = False
+            st.session_state.pop("chat_error", None)
+            st.rerun()
+
 with tab_fix:
+    fix_flash = st.session_state.pop("fix_flash", None)
+    if fix_flash:
+        st.success(fix_flash)
     st.caption(
         "审查与修复是两条独立管线：先在「代码审查」得到候选，人工确认要修哪些，"
         "再交给 Fix Agent；修复必须通过「语法 → 接口兼容 → 行为测试」三级验证，不通过会回退原代码。"
@@ -574,102 +771,141 @@ with tab_fix:
     if not review_issues:
         st.info("请先在「代码审查」页完成一次审查，修复计划需要基于审查候选生成。")
     else:
-        option_map = {}
+        option_map: Dict[str, str] = {}
+        missing_candidates = 0
         for issue in review_issues:
             candidate_id = issue.get("candidate_id") or ""
+            if not candidate_id:
+                missing_candidates += 1
+                continue
             option_map[candidate_id] = (
                 f"{issue.get('risk_level')}｜{issue.get('category')} / {issue.get('subtype')}"
                 f"｜行 {issue.get('line_number')}｜{issue.get('adjudication') or 'unadjudicated'}"
             )
-        default_ids = [
-            issue.get("candidate_id")
-            for issue in review_issues
-            if issue.get("candidate_id")
-            and (issue.get("adjudication") or "confirmed") in {"confirmed", "needs_review"}
-        ][:5]
-        selected_ids = st.multiselect(
-            "选择要修复的候选（默认选择已确认/待复核的前 5 条）",
-            options=list(option_map),
-            default=default_ids,
-            format_func=lambda candidate_id: option_map.get(candidate_id, candidate_id),
-        )
-        include_memory_suspected = st.toggle(
-            "也修复「记忆存疑」候选", value=False,
-            help="记忆存疑默认不自动修复；需要人工显式勾选",
-        )
-        if st.button("生成修复计划（人工确认）", type="primary"):
-            with st.spinner("生成修复计划…"):
-                plan_result, error = api_post(
-                    api_host,
-                    "/agent/fix",
-                    {
-                        "code": code,
-                        "issues": review_issues,
-                        "candidate_ids": selected_ids,
-                        "include_memory_suspected": include_memory_suspected,
-                        "strategy": review_result.get("strategy") or "auto",
-                        "confirm": False,
-                    },
-                )
-            if error:
-                st.error(f"生成修复计划失败：{error}")
-                logger.error("生成修复计划失败: %s", error)
-            st.session_state["fix_plan"] = plan_result
-
-        fix_plan = st.session_state.get("fix_plan")
-        if fix_plan:
-            plan = fix_plan.get("plan") or {}
-            st.markdown("### 🧾 待确认修复计划")
-            if plan.get("empty"):
-                st.warning("没有选中可修复的问题。")
-            else:
-                for issue in plan.get("selected") or []:
-                    st.markdown(
-                        f"- `{issue.get('candidate_id')}` [{issue.get('severity')}] "
-                        f"{issue.get('category')} / {issue.get('subtype')} @行 {issue.get('line_number')}"
+        if missing_candidates:
+            st.caption(f"有 {missing_candidates} 条结论缺少候选 ID，无法按候选定向修复，已从选项中忽略。")
+        if not option_map:
+            st.warning("本次审查结果没有可用的候选 ID，请重新审查后再试。")
+        else:
+            default_ids = [
+                issue.get("candidate_id")
+                for issue in review_issues
+                if issue.get("candidate_id")
+                and (issue.get("adjudication") or "confirmed") in {"confirmed", "needs_review"}
+            ][:5]
+            selected_ids = st.multiselect(
+                "选择要修复的候选（默认选择已确认/待复核的前 5 条）",
+                options=list(option_map),
+                default=default_ids,
+                format_func=lambda candidate_id: option_map.get(candidate_id, candidate_id),
+            )
+            include_memory_suspected = st.toggle(
+                "也修复「记忆存疑」候选", value=False,
+                help="记忆存疑默认不自动修复；需要人工显式勾选",
+            )
+            if st.button("生成修复计划（人工确认）", type="primary"):
+                with st.spinner("生成修复计划…"):
+                    plan_result, error = api_post(
+                        api_host,
+                        "/agent/fix",
+                        {
+                            "code": code,
+                            "review_id": review_result.get("review_id") or "",
+                            "codebase_root": codebase_root or None,
+                            "issues": review_issues,
+                            "candidate_ids": selected_ids,
+                            "include_memory_suspected": include_memory_suspected,
+                            "strategy": review_result.get("strategy") or "auto",
+                            "confirm": False,
+                        },
                     )
-                if plan.get("excluded"):
-                    st.caption(f"已跳过：{plan.get('excluded')}")
-                if st.button("确认并执行修复", type="primary"):
-                    with st.spinner("Fix Agent 正在修复并验证…"):
-                        fix_result, error = api_post(
-                            api_host,
-                            "/agent/fix",
-                            {
-                                "code": code,
-                                "issues": review_issues,
-                                "candidate_ids": plan.get("candidate_ids") or [],
-                                "include_memory_suspected": True,
-                                "strategy": review_result.get("strategy") or "auto",
-                                "test_code": test_code,
-                                "confirm": True,
-                            },
+                if error:
+                    st.error(f"生成修复计划失败：{error}")
+                    logger.error("生成修复计划失败: %s", error)
+                else:
+                    st.session_state["fix_plan"] = plan_result
+                    st.session_state["fix_include_memory_suspected"] = include_memory_suspected
+
+            fix_plan = st.session_state.get("fix_plan")
+            if fix_plan:
+                plan = fix_plan.get("plan") or {}
+                st.markdown("### 🧾 待确认修复计划")
+                if fix_plan.get("message"):
+                    st.caption(fix_plan["message"])
+                if fix_plan.get("fix_id"):
+                    st.caption(f"修复计划 ID：`{fix_plan['fix_id']}`（确认后凭此执行）")
+                if plan.get("empty"):
+                    st.warning("没有选中可修复的问题。")
+                else:
+                    for issue in plan.get("selected") or []:
+                        st.markdown(
+                            f"- `{issue.get('candidate_id')}` [{issue.get('severity')}] "
+                            f"{issue.get('category')} / {issue.get('subtype')} @行 {issue.get('line_number')}"
                         )
-                    if error:
-                        st.error(f"修复失败：{error}")
-                        logger.error("修复失败: %s", error)
-                    st.session_state["fix_result"] = fix_result
+                    if plan.get("excluded"):
+                        with st.expander("已跳过的候选与原因"):
+                            st.dataframe(
+                                [
+                                    {
+                                        "候选 ID": item.get("candidate_id"),
+                                        "原因": item.get("reason"),
+                                    }
+                                    for item in plan.get("excluded") or []
+                                ],
+                                width="stretch",
+                                hide_index=True,
+                            )
+                    if st.button("确认并执行修复", type="primary"):
+                        with st.spinner("Fix Agent 正在修复并验证…"):
+                            fix_result, error = api_post(
+                                api_host,
+                                "/agent/fix",
+                                {
+                                    "code": code,
+                                    "fix_id": fix_plan.get("fix_id") or "",
+                                    "codebase_root": codebase_root or None,
+                                    "issues": review_issues,
+                                    "candidate_ids": plan.get("candidate_ids") or [],
+                                    "include_memory_suspected": st.session_state.get(
+                                        "fix_include_memory_suspected", False
+                                    ),
+                                    "strategy": review_result.get("strategy") or "auto",
+                                    "test_code": test_code,
+                                    "confirm": True,
+                                },
+                            )
+                        if error:
+                            st.error(f"修复失败：{error}")
+                            logger.error("修复失败: %s", error)
+                        else:
+                            st.session_state["fix_result"] = fix_result
 
     fix_result = st.session_state.get("fix_result")
     if fix_result:
         result = fix_result.get("result") or {}
+        verification = fix_result.get("verification") or result.get("verification") or {}
         st.markdown("### 🛠️ 修复结果")
         st.markdown(f"**说明**：{result.get('optimization_summary') or '（无）'}")
         st.caption(
-            f"接口兼容={result.get('signature_match')}｜有改动={result.get('changed')}｜"
-            f"回退原代码={result.get('used_fallback')}｜尝试次数={result.get('attempts')}"
+            f"验证通过={verification.get('passed')}｜接口兼容={result.get('signature_match')}｜"
+            f"有改动={result.get('changed')}｜回退原代码={result.get('used_fallback')}｜"
+            f"尝试次数={result.get('attempts')}"
         )
         render_verification(result)
         if result.get("patch"):
             with st.expander("改动补丁（unified diff）", expanded=True):
                 st.code(result["patch"], language="diff")
         st.code(result.get("optimized_code") or "（无）", language="python")
-        st.download_button(
+        action_col1, action_col2 = st.columns(2)
+        action_col1.download_button(
             "📥 下载修复后代码",
             data=result.get("optimized_code") or "",
             file_name="optimized_code.py",
             mime="text/plain",
         )
+        if result.get("optimized_code") and action_col2.button("↩️ 回填到编辑区", key="apply_fix_to_editor"):
+            st.session_state["pending_code"] = result["optimized_code"]
+            st.rerun()
         render_trace(fix_result.get("trace") or {})
     else:
         st.markdown(
@@ -677,6 +913,229 @@ with tab_fix:
             "填写验收测试可以额外跑一遍行为测试。</div>",
             unsafe_allow_html=True,
         )
+
+with tab_manage:
+    st.markdown("### 📊 运行统计与项目记忆")
+    st.caption("按需查询后端记录。运行统计基于已持久化的轨迹，不代表所有请求都已采集。")
+    if st.button("刷新运行统计", key="load_stats"):
+        data, error = api_get(api_host, "/agent/stats", timeout=30)
+        if error:
+            st.error(error)
+        else:
+            st.session_state["stats_data"] = data
+    stats_data = st.session_state.get("stats_data")
+    if stats_data:
+        runs = int(stats_data.get("runs") or 0)
+        if not runs:
+            st.info("还没有采集到运行轨迹：完成一次审查或修复后会自动落盘。")
+        else:
+            cost = float(stats_data.get("avg_cost") or 0)
+            cols = st.columns(4)
+            cols[0].metric("运行次数", runs)
+            cols[1].metric("平均 Token", f"{float(stats_data.get('avg_tokens') or 0):.0f}")
+            cols[2].metric("平均耗时", f"{float(stats_data.get('avg_duration_ms') or 0) / 1000:.2f}s")
+            cols[3].metric("平均估算费用", "未配置单价" if cost <= 0 else f"${cost:.6f}")
+        stop_reasons = stats_data.get("stop_reasons") or {}
+        tool_usage = stats_data.get("tool_usage") or {}
+        if stop_reasons:
+            st.markdown("**停止原因分布**")
+            st.dataframe(
+                [{"停止原因": name, "次数": count} for name, count in stop_reasons.items()],
+                width="stretch",
+                hide_index=True,
+            )
+        if tool_usage:
+            st.markdown("**工具调用分布**")
+            st.dataframe(
+                [{"工具": name, "次数": count} for name, count in tool_usage.items()],
+                width="stretch",
+                hide_index=True,
+            )
+        with st.expander("原始统计 JSON"):
+            st.json(stats_data)
+
+    if st.button("查看当前项目与会话记忆", key="load_memory"):
+        query = urlencode({"project": project, "session_id": st.session_state["chat_session_id"]})
+        data, error = api_get(api_host, f"/agent/memory?{query}", timeout=30)
+        if error:
+            st.error(error)
+        else:
+            st.session_state["memory_data"] = data
+    memory_data = st.session_state.get("memory_data")
+    if memory_data:
+        memory_stats = memory_data.get("stats") or {}
+        cols = st.columns(4)
+        cols[0].metric("长期记忆", memory_stats.get("total", 0))
+        cols[1].metric("短期会话", memory_stats.get("short_term_sessions", 0))
+        cols[2].metric("当前感知", memory_stats.get("perceptions", 0))
+        cols[3].metric("存储后端", memory_stats.get("backend") or "—")
+        by_kind = memory_stats.get("by_kind") or {}
+        if by_kind:
+            st.caption("记忆类型分布：" + "、".join(f"{kind} {count}" for kind, count in by_kind.items()))
+        records = memory_data.get("records") or []
+        if records:
+            st.markdown("**长期记忆（最近 50 条）**")
+            st.dataframe(
+                [
+                    {
+                        "类型": record.get("kind"),
+                        "项目": record.get("project"),
+                        "内容": (record.get("text") or "").replace("\n", " ")[:120],
+                        "时间": datetime.fromtimestamp(float(record.get("created_at") or 0)).strftime("%Y-%m-%d %H:%M"),
+                    }
+                    for record in records
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.caption("当前项目还没有长期记忆记录。")
+        turns = memory_data.get("short_term") or []
+        if turns:
+            st.markdown("**当前会话短期记忆**")
+            st.dataframe(
+                [
+                    {
+                        "角色": (turn.get("payload") or {}).get("role"),
+                        "内容": (turn.get("text") or "").replace("\n", " ")[:160],
+                        "时间": datetime.fromtimestamp(float(turn.get("created_at") or 0)).strftime("%Y-%m-%d %H:%M"),
+                    }
+                    for turn in turns
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        if memory_data.get("perception"):
+            with st.expander("当前感知元数据（不含源码）"):
+                st.json(memory_data["perception"])
+
+    with st.expander("新增或更新项目事实"):
+        with st.form("entity_memory"):
+            entity_type = st.selectbox("事实类型", ["project", "file", "component"])
+            entity_name = st.text_input("名称", placeholder="例如：数据库访问层")
+            entity_facts = st.text_area("结构化事实（JSON 对象）", value='{"database": "PostgreSQL"}')
+            save_entity = st.form_submit_button("保存项目事实")
+        if save_entity:
+            try:
+                facts = json.loads(entity_facts)
+                if not entity_name.strip() or not isinstance(facts, dict):
+                    raise ValueError("名称不能为空，事实必须是 JSON 对象")
+            except ValueError as exc:
+                st.error(f"输入错误：{exc}")
+            else:
+                data, error = api_post(api_host, "/agent/memory/entity", {
+                    "project": project, "entity_type": entity_type, "name": entity_name.strip(), "facts": facts,
+                }, timeout=30)
+                if error:
+                    st.error(error)
+                else:
+                    st.success(f"项目事实已保存（{data.get('record', {}).get('id') or '已更新'}）")
+                    st.json(data)
+
+    with st.expander("查询持久化运行轨迹"):
+        run_id = st.text_input("运行 ID", key="lookup_run_id")
+        if st.button("查询运行轨迹", key="lookup_trace"):
+            if not run_id.strip():
+                st.warning("请输入运行 ID")
+            else:
+                data, error = api_get(api_host, f"/agent/trace/{quote(run_id.strip(), safe='')}", timeout=30)
+                if error:
+                    st.error(error)
+                else:
+                    lines = data.get("lines") or []
+                    meta = next((line for line in lines if line.get("type") == "run_meta"), {})
+                    if meta:
+                        usage = meta.get("usage") or {}
+                        st.caption(
+                            f"任务={meta.get('task')}｜停止原因={meta.get('stop_reason')}｜"
+                            f"耗时={round(float(meta.get('duration_ms') or 0) / 1000, 2)}s｜"
+                            f"Token={usage.get('total_tokens')}｜错误={meta.get('error') or '无'}"
+                        )
+                        if meta.get("tool_calls"):
+                            st.dataframe(
+                                [{"工具": name, "次数": count} for name, count in meta["tool_calls"].items()],
+                                width="stretch",
+                                hide_index=True,
+                            )
+                    steps = [line for line in lines if line.get("type") == "step"]
+                    if steps:
+                        st.dataframe(
+                            [
+                                {
+                                    "步": step.get("index"),
+                                    "类型": step.get("kind"),
+                                    "内容": str(step.get("content") or "")[:160],
+                                    "工具": (step.get("tool_call") or {}).get("name"),
+                                    "耗时(ms)": round(float(step.get("latency_ms") or 0), 1),
+                                    "Token": (step.get("usage") or {}).get("total_tokens"),
+                                }
+                                for step in steps
+                            ],
+                            width="stretch",
+                            hide_index=True,
+                        )
+                    else:
+                        st.caption("该轨迹没有步骤记录。")
+                    with st.expander("原始轨迹行"):
+                        st.json(lines)
+
+    with st.expander("恢复审查或修复检查点"):
+        checkpoint_id = st.text_input("审查 / 修复 ID", key="checkpoint_id")
+        if st.button("读取检查点", key="load_checkpoint"):
+            st.session_state.pop("loaded_checkpoint", None)
+            st.session_state.pop("recovered_plan", None)
+            if not checkpoint_id.strip():
+                st.warning("请输入检查点 ID")
+            else:
+                data, error = api_get(api_host, f"/agent/workflows/{quote(checkpoint_id.strip(), safe='')}", timeout=30)
+                if error:
+                    st.error(error)
+                else:
+                    st.session_state["loaded_checkpoint"] = data
+        checkpoint = st.session_state.get("loaded_checkpoint")
+        if checkpoint:
+            st.caption(
+                f"类型：{checkpoint.get('kind')} · 状态：{checkpoint.get('status')} · "
+                f"父 ID：{checkpoint.get('parent_id') or '—'}"
+            )
+            with st.expander("检查点内容"):
+                st.json(checkpoint.get("payload") or {})
+            if checkpoint.get("kind") == "review":
+                if st.button("根据此快照生成待确认计划", key="recover_plan"):
+                    data, error = api_post(api_host, "/agent/fix", {"review_id": checkpoint["id"], "confirm": False,
+                                          "codebase_root": codebase_root or None})
+                    if error:
+                        st.error(error)
+                    else:
+                        st.session_state["recovered_plan"] = data
+            recovered = st.session_state.get("recovered_plan")
+            if recovered:
+                plan = recovered.get("plan") or {}
+                st.caption(
+                    f"计划 ID：{recovered.get('fix_id') or '—'}｜候选 {len(plan.get('candidate_ids') or [])} 条"
+                    f"｜跳过 {len(plan.get('excluded') or [])} 条"
+                )
+                for issue in plan.get("selected") or []:
+                    st.markdown(
+                        f"- `{issue.get('candidate_id')}` [{issue.get('severity')}] "
+                        f"{issue.get('category')} / {issue.get('subtype')} @行 {issue.get('line_number')}"
+                    )
+                with st.expander("计划原始 JSON"):
+                    st.json(recovered)
+            recovery_id = checkpoint["id"] if checkpoint.get("kind") == "fix" else (recovered or {}).get("fix_id")
+            if recovery_id and checkpoint.get("status") != "completed":
+                st.caption("将使用检查点保存的源码，不使用当前编辑区代码。请先核对上方问题与候选。")
+                recovery_tests = st.text_area("恢复修复的验收测试（可选）", key="recovery_tests")
+                if st.button("确认并执行此检查点修复", key="execute_checkpoint"):
+                    with st.spinner("正在恢复修复并验证…"):
+                        data, error = api_post(api_host, "/agent/fix", {"fix_id": recovery_id, "confirm": True,
+                                              "test_code": recovery_tests, "codebase_root": codebase_root or None})
+                    if error:
+                        st.error(error)
+                    else:
+                        st.session_state["fix_result"] = data
+                        st.session_state["fix_flash"] = "检查点修复执行完成，已切换到「代码修复」页展示结果与验证详情。"
+                        st.rerun()
 
 st.markdown(
     '<div class="app-footer">多 Agent 代码审查 · 共享证据 / 领域协作 / 独立验证 / 规则裁决 · '

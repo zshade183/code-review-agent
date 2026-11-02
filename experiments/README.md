@@ -23,17 +23,6 @@ python experiments/exp1_recognition.py --arms baseline
 和 `reports/exp1/summary.md`（汇总表）。三组共享样本顺序、标注、随机种子与
 “类别 + 行号 ±1”匹配口径。
 
-## 多 Agent 主线消融（已编写，默认不运行）
-
-`multi_agent_ablation.py` 比较 `fast / auto / full`，并提供去掉 Critic、Verifier、记忆的
-组件消融。为避免误调用真实模型，默认仅输出 dry-run 协议：
-
-```powershell
-python experiments/multi_agent_ablation.py
-```
-
-确认实验计划后，显式加入 `--execute` 才会运行；`--mock` 可做无成本流程冒烟。
-
 保留的辅助模块：
 
 - `dataset_loader.py`：严格加载与确定性抽样；

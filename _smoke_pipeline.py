@@ -2,8 +2,8 @@ import json
 import sys
 
 from agent.llm import LLMClient
+from agent.langgraph.llm import create_llm
 from agent.pipelines import FixPipeline, ReviewPipeline
-from agent.runtime import AgentConfig
 
 CODE = '''import os
 import pickle
@@ -19,16 +19,16 @@ def run(cmd):
     os.system("echo " + cmd)
 '''
 
-pipeline = ReviewPipeline(client=LLMClient(mock=True), persist_traces=False)
+pipeline = ReviewPipeline(llm=create_llm("mock"), use_memory=False)
 for strategy in ("fast", "auto", "full"):
     result = pipeline.review(CODE, file_path="demo.py", strategy=strategy)
     print("=" * 70)
-    print("strategy:", strategy, "| roles:", result.stats["plan"]["reviewer_roles"])
+    print("strategy:", strategy, "| roles:", result.stats["selected_roles"])
     print("summary:", result.report.review_summary)
     print("coverage:", json.dumps(result.coverage.to_dict(), ensure_ascii=False))
     print("adjudication:", result.stats["adjudication"])
     print("issues:", [(i.category.value, i.subtype, i.line_start, i.adjudication.value) for i in result.report.issues])
-    print("verifier:", result.stats["verifier_status"], "critic:", result.stats["critic"])
+    print("verification:", result.stats["verification"])
 
 fixer = FixPipeline(client=LLMClient(mock=True))
 plan = fixer.plan(CODE, result.report)

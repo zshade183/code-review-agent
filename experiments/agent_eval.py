@@ -15,8 +15,8 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.llm import LLMClient
-from agent.reviewer_agent import ReviewerAgent
-from agent.runtime import AgentConfig, extract_json_block
+from agent.pipelines import ReviewPipeline
+from agent.runtime import extract_json_block
 from agent.schema import ReviewReport
 from agent.tools.static_analysis import run_bandit, run_pylint, run_rules
 from experiments.agent_metrics import aggregate, evaluate_report
@@ -60,9 +60,11 @@ def single_call_report(client: LLMClient, code: str) -> tuple[ReviewReport, dict
 
 
 def run_arm(arm: str, samples: list[Sample], client: LLMClient) -> dict[str, Any]:
-    reviewer = (ReviewerAgent(client=client, config=AgentConfig(max_steps=8, max_tool_calls=6),
-                              memory=None)
-                if arm == "full_agent" else None)
+    reviewer = (
+        ReviewPipeline(provider="mock" if getattr(client, "mock", False) else None, use_memory=False)
+        if arm == "full_agent"
+        else None
+    )
     rows: list[dict[str, Any]] = []
     wall_start = time.perf_counter()
     for sample in samples:
@@ -79,9 +81,10 @@ def run_arm(arm: str, samples: list[Sample], client: LLMClient) -> dict[str, Any
                 row.update(steps=1, tool_calls=0)
             else:
                 assert reviewer is not None
-                report, outcome = reviewer.review(sample.code, file_path=f"{sample.sample_id}.py")
-                row = evaluate_report(report, ground_truth(sample), run=outcome.run,
-                                      sample_id=sample.sample_id)
+                result = reviewer.review(sample.code, file_path=f"{sample.sample_id}.py")
+                report = result.report
+                row = evaluate_report(report, ground_truth(sample), sample_id=sample.sample_id)
+                row.update(duration_ms=result.elapsed_ms, steps=len(result.events), tool_calls=0)
             row["error"] = row.get("error") or ""
             row["predicted_issues"] = [item.model_dump(mode="json") for item in report.issues]
             row["sample_type"] = "clean" if not sample.issues else "single" if len(sample.issues) == 1 else "multi"

@@ -57,29 +57,21 @@ TEMPERATURE = _env_float("AGENT_TEMPERATURE", 0.1)
 #: 当模型不支持原生 function calling 时，是否降级为文本 ReAct 协议
 TEXT_REACT_FALLBACK = _env_bool("AGENT_TEXT_REACT_FALLBACK", True)
 
-# ---------- 多 Agent 主线 ----------
-#: 默认审查策略：fast=单 Agent；auto=按证据选择领域 Reviewer；full=四领域 + Critic + Verifier
+# ---------- LangGraph 多 Agent 主线 ----------
+#: 默认策略。三档共用固定拓扑，但 fan-out 规模不同。
 DEFAULT_STRATEGY = (os.getenv("AGENT_DEFAULT_STRATEGY") or "auto").strip().lower()
-#: 单个领域 Reviewer 的超时（秒）。超时不算整体失败，只降低覆盖率。
-REVIEWER_TIMEOUT_S = _env_float("AGENT_REVIEWER_TIMEOUT_S", 180.0)
-#: 领域 Reviewer 失败后的重试次数（仅对异常生效，超时不重试）
-REVIEWER_RETRIES = _env_int("AGENT_REVIEWER_RETRIES", 1)
-#: 选择性 Critic 的超时（秒）
-CRITIC_TIMEOUT_S = _env_float("AGENT_CRITIC_TIMEOUT_S", 120.0)
-#: 独立 Verifier 允许的最长执行时间（秒）
-VERIFIER_TIMEOUT_S = _env_float("AGENT_VERIFIER_TIMEOUT_S", 90.0)
-#: 自动策略下最多启动多少个领域 Reviewer
-AUTO_MAX_REVIEWERS = _env_int("AGENT_AUTO_MAX_REVIEWERS", 4)
-#: 最终裁决中「无独立佐证但可确认」的置信度下限
 ADJUDICATION_CONFIRM_CONFIDENCE = _env_float("AGENT_ADJUDICATION_CONFIRM_CONFIDENCE", 0.65)
-#: 进入选择性 Critic 的判据：置信度低于该值即复核
-CRITIC_LOW_CONFIDENCE = _env_float("AGENT_CRITIC_LOW_CONFIDENCE", 0.7)
-#: 进入选择性 Critic 的判据：严重性不低于该值即复核
-CRITIC_FORCE_REVIEW_SEVERITIES = tuple(
-    item.strip().upper()
-    for item in (os.getenv("AGENT_CRITIC_FORCE_REVIEW_SEVERITIES") or "HIGH,MEDIUM-HIGH").split(",")
-    if item.strip()
+VERIFICATION_LOW_CONFIDENCE = _env_float(
+    "AGENT_VERIFICATION_LOW_CONFIDENCE", _env_float("AGENT_CRITIC_LOW_CONFIDENCE", 0.7)
 )
+REVIEW_FAST_MAX_STEPS = _env_int("AGENT_REVIEW_FAST_MAX_STEPS", 3)
+REVIEW_FAST_MAX_TOOL_CALLS = _env_int("AGENT_REVIEW_FAST_MAX_TOOL_CALLS", 2)
+REVIEW_AUTO_MAX_STEPS = _env_int("AGENT_REVIEW_AUTO_MAX_STEPS", 6)
+REVIEW_AUTO_MAX_TOOL_CALLS = _env_int("AGENT_REVIEW_AUTO_MAX_TOOL_CALLS", 4)
+REVIEW_FULL_MAX_STEPS = _env_int("AGENT_REVIEW_FULL_MAX_STEPS", 8)
+REVIEW_FULL_MAX_TOOL_CALLS = _env_int("AGENT_REVIEW_FULL_MAX_TOOL_CALLS", 6)
+VERIFICATION_MAX_STEPS = _env_int("AGENT_VERIFICATION_MAX_STEPS", 4)
+VERIFICATION_MAX_TOOL_CALLS = _env_int("AGENT_VERIFICATION_MAX_TOOL_CALLS", 3)
 
 # ---------- 工具开关 ----------
 ENABLE_PYLINT = _env_bool("AGENT_ENABLE_PYLINT", True)

@@ -25,6 +25,7 @@ def _func_label(node: ast.AST) -> str:
 
 
 class GetAstOutlineTool(Tool):
+    result_fields = {"syntax_ok": bool, "definitions": list}
     name = "get_ast_outline"
     description = (
         "解析 Python 代码的抽象语法树，返回函数与类的结构清单：名称、起止行号、参数、"
@@ -207,6 +208,7 @@ class CheckSignatureTool(Tool):
 
 
 class FindSymbolTool(Tool):
+    result_fields = {"symbol": str, "definitions": list, "reference_lines": list}
     name = "find_symbol"
     description = (
         "在给定代码中查找某个标识符的定义位置与所有引用行号。当需要确认一个变量/函数"

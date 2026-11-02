@@ -1,11 +1,11 @@
 # Code Review Agent
 
-以多 Agent 为主线的 Python 代码审查与修复项目，支持命令行、REST API、VS Code 插件、
-Streamlit 页面和 MCP 接入。主线采用共享证据、领域 Reviewer 并行、选择性 Critic、独立
-Verifier 和确定性裁决；修复作为独立管线，包含语法、接口兼容和受限子进程验证。
+以 LangGraph 多 Agent 为主线的 Python 代码审查与修复项目，支持命令行、REST API、
+VS Code 插件、Streamlit 页面和 MCP 接入。Review Agent 自主使用只读工具发现问题，
+风险候选交给独立 Verification Agent 查证；用户确认后由 Fix Agent 生成候选修复，
+确定性 Harness 强制完成验证、diff 和失败回退。
 
-审查策略分为：`fast`（单 Agent 基线）、`auto`（按证据选择领域，默认）和 `full`
-（四领域 + Critic + Verifier）。多 Agent 中单个角色失败不会阻断整次审查，覆盖度会明确标记。
+`fast` 只运行初审，`auto` 按风险复核候选，`full` 复核全部有效候选。
 
 ## 安装与配置
 
@@ -33,9 +33,9 @@ MOCK_MODE=false
 离线模式用于检查调用流程，优化时可能返回原代码。
 
 可选配置见 `.env.example`：`AGENT_MAX_STEPS`、`AGENT_MAX_TOOL_CALLS`、
-`AGENT_MAX_WALL_CLOCK_S` 控制单 Agent 预算；`AGENT_DEFAULT_STRATEGY`、
-`AGENT_REVIEWER_TIMEOUT_S`、`AGENT_CRITIC_TIMEOUT_S` 控制多 Agent 编排；
-`AGENT_CODEBASE_ROOT` 指定检索目录。
+`AGENT_MAX_WALL_CLOCK_S` 控制修复 Agent 预算；`AGENT_DEFAULT_STRATEGY` 设置默认审查档位；
+`AGENT_REVIEWER_TIMEOUT_S` 和 `AGENT_REVIEWER_RETRIES` 控制领域任务；`AGENT_CODEBASE_ROOT`
+指定检索目录。多 Agent 路由和状态由 LangGraph 管理。
 Pylint 与 Bandit 缺失时会跳过对应引擎。代码执行使用受限子进程，不是容器隔离。
 
 ## 命令行
@@ -102,20 +102,24 @@ API 文档位于 http://127.0.0.1:8000/docs，Streamlit 通常位于 http://loca
 ## 多 Agent 主线
 
 ```text
-Evidence Collector（公共取证一次）
-→ Security / Bug / Quality / Performance Reviewer 并行
-→ Candidate Merger（确定性去重与冲突检测）
-→ Independent Verifier / Selective Critic 并行
-→ Deterministic Adjudicator
-→ Memory Adjustment
-→ Final Report
+基础上下文（语法、AST、项目记忆）
+→ Review Agent 按需调用静态分析、符号和项目检索工具
+→ 候选契约校验与去重
+→ 条件式 Verification Agent 独立查证
+→ 确定性裁决
+→ 确定性裁决与 Final Report
 → 用户确认
 → Fix Pipeline
 ```
 
-领域 Reviewer 共享原始证据但不共享彼此结论，也拿不到写入和执行工具。Verifier 根据真实
-工具轨迹选择没有参与前序取证的引擎；没有独立引擎时会明确标记能力限制，而不会用同一份
-证据“自证”。最终结果分为 `confirmed`、`needs_review`、`memory_suspected` 和 `rejected`。
+Review 与 Verification 使用独立上下文和只读工具白名单，工具结果按输入 hash 在请求内缓存。
+高风险、低置信度及历史误报疑似候选触发复核；失败或预算未完成的候选保留为待人工复核，
+相同引擎的缓存结果不会被重复计为新的独立证据。
+
+工具权限按 capability profile 强制划分：Review 可运行静态扫描来发现候选；Verification
+默认只使用语法、AST、符号与项目上下文工具寻找成立条件或反证，不重复完整扫描；Fix Agent
+只能分析候选和沙箱自测，拿不到最终补丁工具；Harness 独占验证、diff、交付与失败回退。
+`build_full_registry()` 仅供显式管理和调试入口，正式工作流使用最小工具并集。
 
 公共证据同时包含顶层 import、符号摘要；配置 `AGENT_CODEBASE_ROOT` 后还会加入跨文件
 BM25 检索结果。审查结果会获得持久化 `review_id`，`/agent/fix` 返回待确认计划及
@@ -151,11 +155,11 @@ npm run compile
 ```powershell
 python mcp_server.py --list
 python mcp_server.py --profile review
-python -m review_assistant.main --file your_file.py --mock --question "审查这个文件"
+python -m agent.langgraph.main --file your_file.py --mock --question "审查这个文件"
 ```
 
 MCP 使用标准输入输出传输 JSON-RPC；客户端配置 Python 解释器和 `mcp_server.py` 的绝对路径。
-`review_assistant/` 提供独立的 LangGraph 交互入口，详见其目录内说明。
+交互式 LangGraph 入口与正式管线都位于 `agent/`。
 
 ## 实验与数据
 
@@ -172,23 +176,25 @@ python experiments/exp1_recognition.py --mock --max-samples 3 --out-dir reports/
 
 正式输出为 `reports/exp1/report.json` 和 `summary.md`，包含识别指标、耗时、Token 和逐样本结果。
 
-新多 Agent 消融协议位于 `experiments/multi_agent_ablation.py`，覆盖 `fast/auto/full` 及
-去 Critic、去 Verifier、去记忆。脚本默认只打印计划，必须显式添加 `--execute` 才会运行。
 `reports/simulation/` 是人为构造的展示数据，不是实测结果。详见 [实验说明](experiments/README.md)。
 
 ## 验证与目录
 
 ```powershell
 python test/test_agent.py
-python test/test_review_assistant.py
+python test/test_langgraph_agent.py
 python test/test_dataset_loader.py
 python test/test_web_app.py
 ```
 
 | 目录或文件 | 内容 |
 |---|---|
-| `agent/` | 正式多 Agent 主线、共享证据、裁决、修复、工具、轨迹与记忆 |
-| `review_assistant/` | LangGraph 实验与交互式人工确认工作流 |
+| `agent/agents/` | Review / Verification 角色配置与提示词；不执行工具 |
+| `agent/executors/` | Review、Verification、Fix 共用的模型调用、工具循环、预算、finalizer 重试和执行轨迹 |
+| `agent/tools/` | AST、静态分析、检索、补丁、沙箱等原子能力与注册表 |
+| `agent/adapters/` | MCP 等外部协议适配；工作流包装不会进入 Agent 工具白名单 |
+| `agent/langgraph/` | Review → Verification 的状态、路由与确定性裁决 |
+| `agent/pipelines/` | 面向 CLI / API 的审查与修复应用服务 |
 | `core/` | 规则引擎与兼容实现 |
 | `cli.py`、`api/`、`mcp_server.py` | 命令行、HTTP、MCP 入口 |
 | `vscode-plugin/`、`web/` | 编辑器插件、Web 页面 |

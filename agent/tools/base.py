@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import subprocess
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Sequence, Type
 
@@ -38,6 +39,22 @@ class Tool(ABC):
     #: 该工具是否可能产生副作用（执行代码 / 改写代码），用于把「纯只读分析」与
     #: 「会执行或改写产物」的能力区分开；MCP 客户端与运行时审计据此决定是否需要人工确认
     mutating: bool = False
+    # Only explicitly idempotent tools may retry automatically.
+    retry_safe: bool = False
+    max_attempts: int = 2
+    retry_delay_s: float = 0.1
+    result_fields: Dict[str, type] | None = None
+
+    def validate_result(self, result: ToolResult) -> None:
+        """Override to validate a tool-specific data contract before accepting evidence."""
+        if not isinstance(result, ToolResult):
+            raise ValueError("工具必须返回 ToolResult")
+        if result.ok and self.result_fields is not None:
+            if not isinstance(result.data, dict):
+                raise ValueError("工具 data 必须是对象")
+            for key, expected in self.result_fields.items():
+                if key not in result.data or not isinstance(result.data[key], expected):
+                    raise ValueError(f"工具 data.{key} 必须为 {expected.__name__}")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -103,45 +120,61 @@ class Tool(ABC):
         expected = spec.get("type")
         try:
             if expected == "integer" and not isinstance(value, bool):
+                if isinstance(value, float) and not value.is_integer():
+                    raise ValueError("不能截断小数")
                 return int(value)
             if expected == "number" and not isinstance(value, bool):
                 return float(value)
             if expected == "boolean" and isinstance(value, str):
-                return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+                normalized = value.strip().lower()
+                if normalized not in {"1", "true", "yes", "y", "on", "0", "false", "no", "n", "off"}:
+                    raise ValueError("非法布尔值")
+                return normalized in {"1", "true", "yes", "y", "on"}
             if expected == "string" and not isinstance(value, str):
                 return str(value)
             if expected == "array" and isinstance(value, str):
                 return [v.strip() for v in value.split(",") if v.strip()]
         except (TypeError, ValueError) as exc:
             raise ToolError(f"参数 '{key}' 期望 {expected}，但无法解析 {value!r}: {exc}") from exc
+        types = {"integer": int, "number": (int, float), "boolean": bool, "array": list, "object": dict, "string": str}
+        if expected in types and (not isinstance(value, types[expected]) or
+                                  (expected in {"integer", "number"} and isinstance(value, bool))):
+            raise ToolError(f"参数 '{key}' 期望 {expected}")
         return value
 
     def __call__(self, **arguments: Any) -> ToolResult:
-        """带计时与异常兜底的统一入口。"""
-        started = time.time()
+        """Validate inputs, classify failures and retry explicitly safe transient failures."""
+        started = time.perf_counter()
         try:
             cleaned = self.validate_arguments(arguments)
-            result = self.run(**cleaned)
-            result.duration_ms = (time.time() - started) * 1000.0
-            result.tool = self.name
-            return result
         except ToolError as exc:
             return ToolResult(
-                tool=self.name,
-                ok=False,
-                error=str(exc),
-                content=f"参数校验失败：{exc}",
-                duration_ms=(time.time() - started) * 1000.0,
+                tool=self.name, ok=False, error=str(exc),
+                error_type="invalid_arguments", attempts=0,
+                duration_ms=(time.perf_counter() - started) * 1000,
             )
-        except Exception as exc:  # noqa: BLE001 - 工具异常必须转成观察结果而非中断 Agent
-            logger.exception("工具 %s 执行异常", self.name)
-            return ToolResult(
-                tool=self.name,
-                ok=False,
-                error=f"{type(exc).__name__}: {exc}",
-                content=f"工具执行异常：{type(exc).__name__}: {exc}",
-                duration_ms=(time.time() - started) * 1000.0,
-            )
+        limit = max(1, min(self.max_attempts, 3)) if self.retry_safe and not self.mutating else 1
+        for attempt in range(1, limit + 1):
+            try:
+                result = self.run(**cleaned)
+                try:
+                    self.validate_result(result)
+                except Exception as exc:
+                    result = ToolResult(tool=self.name, ok=False, error=str(exc), error_type="invalid_output")
+            except (TimeoutError, ConnectionError, subprocess.TimeoutExpired) as exc:
+                result = ToolResult(tool=self.name, ok=False, error=str(exc), error_type="transient_error", retryable=True)
+            except PermissionError as exc:
+                result = ToolResult(tool=self.name, ok=False, error=str(exc), error_type="permission_denied")
+            except Exception as exc:
+                logger.exception("工具 %s 执行异常", self.name)
+                result = ToolResult(tool=self.name, ok=False, error=f"{type(exc).__name__}: {exc}", error_type="execution_error")
+            result.tool = self.name
+            result.attempts = attempt
+            if result.ok or not result.retryable or attempt == limit:
+                break
+            time.sleep(max(0, min(self.retry_delay_s, 1)) * 2 ** (attempt - 1))
+        result.duration_ms = (time.perf_counter() - started) * 1000
+        return result
 
     @abstractmethod
     def run(self, **kwargs: Any) -> ToolResult:

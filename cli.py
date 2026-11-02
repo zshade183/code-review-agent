@@ -5,8 +5,8 @@
 .. code-block:: powershell
 
     python cli.py review  demo.py                  # 默认 strategy=auto
-    python cli.py review  demo.py --strategy fast  # 单 Agent（编辑器实时检查基线）
-    python cli.py review  demo.py --strategy full  # 四领域 + Critic + Verifier
+    python cli.py review  demo.py --strategy fast  # 仅初审，低延迟
+    python cli.py review  demo.py --strategy full  # 初审后复核全部候选
     python cli.py fix     demo.py --yes            # 审查 → 用户确认 → 修复管线
     python cli.py optimize demo.py                 # 兼容旧入口（等价于 fix 且自动确认）
 
@@ -89,27 +89,13 @@ def _build_pipeline(
 
 
 def _pipeline_trace(result: Any) -> Dict[str, Any]:
-    """把多角色轨迹压成 CI / 前端可消费的单一结构。"""
-    runs = result.runs
-    if not runs:
-        return {"roles": {}, "steps": 0, "usage": {"total_tokens": 0}, "tool_calls": {}}
-    if len(runs) == 1:
-        return next(iter(runs.values())).to_trace_dict()
-    total_tokens = sum(run.usage.total_tokens for run in runs.values())
-    tool_calls: Dict[str, int] = {}
-    stop_reasons: Dict[str, str] = {}
-    for role, run in runs.items():
-        stop_reasons[role] = run.stop_reason
-        for name, count in run.tool_call_stats().items():
-            tool_calls[name] = tool_calls.get(name, 0) + count
+    """把 LangGraph 事件压成 CI / 前端可消费的轨迹。"""
     return {
         "multi_agent": True,
+        "engine": "langgraph",
         "strategy": result.strategy.value,
-        "roles": {role: run.to_trace_dict() for role, run in runs.items()},
-        "steps": sum(len(run.steps) for run in runs.values()),
-        "tool_calls": dict(sorted(tool_calls.items(), key=lambda item: -item[1])),
-        "usage": {"total_tokens": total_tokens},
-        "stop_reasons": stop_reasons,
+        "events": result.events,
+        "steps": len(result.events),
         "duration_ms": round(result.elapsed_ms, 2),
     }
 
@@ -120,7 +106,7 @@ def _render_pipeline_text(name: str, result: Any) -> str:
     stats = result.stats
     lines = [
         f"=== Code Review Report: {name} ===",
-        f"Strategy: {result.strategy.value}   ({result.orchestration.plan.reason})",
+        f"Strategy: {result.strategy.value}   Engine: LangGraph",
         f"Summary: {report.review_summary}",
         "",
         "Issues Found:",
@@ -161,28 +147,13 @@ def _render_pipeline_text(name: str, result: Any) -> str:
         )
     lines.append(f"  partial={result.coverage.partial}")
     lines.append("")
-    lines.append("--- 裁决统计 ---")
-    lines.append(f"  {json.dumps(stats.get('adjudication') or {}, ensure_ascii=False)}")
-    verifier = stats.get("verifier") or {}
-    lines.append(
-        f"  verifier: status={stats.get('verifier_status')} "
-        f"engines={verifier.get('engines_used')} corroborated={verifier.get('corroborated')}"
-    )
-    lines.append(f"  critic: {json.dumps(stats.get('critic') or {}, ensure_ascii=False)}")
-    lines.append(f"  tokens={stats.get('tokens')} elapsed={stats.get('elapsed_ms')}ms")
+    lines.append("--- LangGraph 执行统计 ---")
+    lines.append(f"  events={stats.get('events')} elapsed={stats.get('elapsed_ms')}ms")
 
     lines.append("")
-    lines.append("--- Agent Trace ---")
-    for role, run in result.runs.items():
-        lines.append(
-            f"  [{role:<12}] stop={run.stop_reason:<14} steps={len(run.steps):<3} "
-            f"tools={sum(run.tool_call_stats().values()):<3} tokens={run.usage.total_tokens:<6} "
-            f"duration={run.duration_ms / 1000:.2f}s"
-        )
-    if len(result.runs) == 1:
-        only = next(iter(result.runs.values()))
-        for step in only.steps:
-            lines.append(f"      [{step.index:02d}] {step.kind:<7} {step.brief(160)}")
+    lines.append("--- Graph Events ---")
+    for event in result.events:
+        lines.append(f"  {event.get('type', 'event'):<14} {event.get('node', '')}")
     return "\n".join(lines)
 
 
@@ -223,7 +194,7 @@ def run_legacy(argv: List[str]) -> int:
         "--strategy",
         choices=STRATEGY_CHOICES,
         default="auto",
-        help="审查策略（默认 auto：按证据选择领域 Agent）",
+        help="审查档位：fast 仅初审；auto 风险候选复核；full 全候选复核",
     )
 
     args = parser.parse_args(argv)

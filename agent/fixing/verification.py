@@ -6,7 +6,7 @@
 
 任一级失败：把失败详情回灌给模型反思重试；仍失败则回退原代码，绝不交付坏修复。
 验证由 Python 执行，不依赖模型自觉——这是「Review Pipeline 与 Fix Pipeline 分离」的
-关键：审查角色始终只读，只有 Fix 管线能拿到补丁、执行与测试能力。
+关键：审查角色始终只读；Fix Agent 生成候选，Harness 独占最终验证与回退决定。
 """
 
 from __future__ import annotations

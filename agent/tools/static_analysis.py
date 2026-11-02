@@ -396,6 +396,7 @@ def run_rules(code: str) -> List[Issue]:
 
 
 class RunStaticAnalysisTool(Tool):
+    result_fields = {"issues": list, "engine_stats": dict, "engine_errors": dict}
     name = "run_static_analysis"
     description = (
         "对 Python 代码运行静态分析，返回客观告警清单。包含三种引擎：项目自研规则引擎、"
